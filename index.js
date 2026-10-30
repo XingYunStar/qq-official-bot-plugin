@@ -2497,28 +2497,47 @@ const adapter = new (class QQBotAdapter {
       )
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
-    const installedExample = await this.ensureExamplePlugin()
     for (const token of config.token) {
       const connect = this.connect(token)
       await Bot.sleep(5000, connect)
       // 连接失败（如开机时网络未就绪）时，等本次连接流程结束后在后台重试
       connect.then(ok => !ok && this.retryConnect(token))
     }
-    // 首次安装（或首次启动）后，给 master 发一份使用说明（等连接就绪）
-    const needGuide = installedExample || config.exampleGuideSent !== true
-    if (needGuide) {
+    // 测试插件必须等 TRSS 的 online 之后才能复制：
+    // plugins/example 的 chokidar add 监听是在 online 时才挂上的，
+    // 适配器加载阶段（online 之前）复制进去的文件会被漏掉，只能重启后加载。
+    const installExample = () => {
       const timer = setTimeout(async () => {
         try {
+          const installed = await this.ensureExamplePlugin()
+          if (installed) {
+            // 先等 chokidar 的 add 热加载（debounce 5s）；没加载成功再手动补一次
+            await sleep(10000)
+            const { default: loader } = await import("../../lib/plugins/loader.js")
+            const key = "example/qqbot-test.js"
+            if (!loader.priority?.some(i => i.key === key)) {
+              await loader.importPlugin({
+                name: key,
+                path: `../../plugins/${key}?${Date.now()}`,
+              })
+              loader.watch?.("example", "qqbot-test.js")
+              Bot.makeLog("mark", "测试插件已热加载", this.id)
+            }
+          }
+          const needGuide = installed || config.exampleGuideSent !== true
+          if (!needGuide) return
           if (await this.sendExampleGuide()) {
             config.exampleGuideSent = true
             await configSave()
           }
         } catch (err) {
-          Bot.makeLog("error", ["发送测试插件说明失败", err], this.id)
+          Bot.makeLog("error", ["测试插件安装/加载失败", err], this.id)
         }
-      }, 15000)
+      }, 3000)
       timer.unref?.()
     }
+    if (Bot.stat?.online === 2) installExample()
+    else Bot.once("online", installExample)
   }
 
   /**
