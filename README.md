@@ -2,9 +2,9 @@
 
 # qq-official-bot-plugin
 
-**TRSS-Yunzai 的 QQBot 适配器插件**（基于 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 `QQBot-Plugin`）
+**[TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai) 的 QQBot 适配器插件**（基于 [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)）
 
-[QQ 群 1046894467](https://qm.qq.com/q/WdZoPbyPsI) · [旧版插件](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)
+[QQ 群 1046894467](https://qm.qq.com/q/WdZoPbyPsI) · [流萤QQ官方机器人](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
 
 </div>
 
@@ -12,7 +12,7 @@
 
 ## 简介
 
-本插件是 [Yunzai-QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)（基于 `qq-group-bot`）的**新版实现**，改用持续维护的 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 1.3.3，在保留旧版配置、命令、数据目录的基础上，补上了旧版缺失的一批官方能力。
+本插件是 [Yunzai-QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)（基于 [`qq-group-bot`](https://www.npmjs.com/package/qq-group-bot)）的**新版实现**，改用持续维护的 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 1.3.3，在保留旧版配置、命令、数据目录的基础上，补上了旧版缺失的一批官方能力。
 
 - 适配器 ID、`config/QQBot.yaml`、`data/QQBot/`、`#QQBotxxx` 命令全部沿用旧版，**可以从旧版直接迁移**
 - 收发消息内部仍使用 TRSS 熟悉的扁平消息结构，仅在适配器边界转换成 `qq-official-bot` 的 `{ type, data }`
