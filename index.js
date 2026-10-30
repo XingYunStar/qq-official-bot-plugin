@@ -904,8 +904,9 @@ const adapter = new (class QQBotAdapter {
           break
         case "image":
           if (sharp && i.file) i.file = await this.compressImage(data, i.file)
-          // qq-official-bot 的频道/频道私信图片只支持公网 URL（本地文件会被序列化成空对象）
-          if (typeof i.file !== "string" || !/^https?:\/\//.test(i.file))
+          // legacy（普通消息）模式：保留本地数据，发送时走 multipart 上传，不需要公网地址
+          // 其它模式：频道图片只认公网 URL，先用 TRSS 转存
+          if (config.markdown[data.self_id] !== "legacy" && !this.isHttpUrl(i.file))
             try {
               i.file = String(await Bot.fileToUrl(i.file))
             } catch (err) {
@@ -1026,19 +1027,104 @@ const adapter = new (class QQBotAdapter {
         ...dms,
       })
     }
-    return this.sendGMsg(
-      data,
-      msg => data.bot.sdk.sendDirectMessage(data.guild_id, this.toSdkMessage(msg)),
-      msg,
-    )
+    return this.sendGMsg(data, msg => this.sendGuildElements(data, msg, "direct"), msg)
   }
 
   sendGuildMsg(data, msg) {
-    return this.sendGMsg(
-      data,
-      msg => data.bot.sdk.sendGuildMessage(data.channel_id, this.toSdkMessage(msg)),
-      msg,
+    return this.sendGMsg(data, msg => this.sendGuildElements(data, msg, "guild"), msg)
+  }
+
+  isHttpUrl(value) {
+    return typeof value === "string" && /^https?:\/\//i.test(value)
+  }
+
+  /** 元素里是否有需要上传的本地图片 */
+  hasLocalImage(elements) {
+    return elements.some(
+      el => el.type === "image" && el.data?.file != null && !this.isHttpUrl(el.data.file),
     )
+  }
+
+  /** 把 base64 / dataURI / 本地路径 / Buffer 统一读成 Buffer */
+  async imageToBuffer(file) {
+    if (Buffer.isBuffer(file)) return file
+    if (!file || typeof file !== "string") return null
+    if (file.startsWith("base64://")) return Buffer.from(file.slice(9), "base64")
+    if (/^data:[^;]+;base64,/.test(file))
+      return Buffer.from(file.replace(/^data:[^;]+;base64,/, ""), "base64")
+    return fs.readFile(file.replace(/^file:\/\//, ""))
+  }
+
+  /**
+   * 频道/频道私信 legacy 模式发送本地图片：
+   * 官方接口支持 multipart/form-data 的 file_image 文件流，
+   * 这样可以绕开「必须公网 URL」的限制。
+   */
+  async sendGuildMultipart(data, elements, endpoint) {
+    const form = new FormData()
+    let content = ""
+    let file = null
+    for (const el of elements) {
+      switch (el.type) {
+        case "text":
+          content += el.data?.text ?? ""
+          break
+        case "at":
+          content += el.data?.user_id === "all" ? "<@everyone>" : `<@!${el.data?.user_id}>`
+          break
+        case "image":
+          file = await this.imageToBuffer(el.data?.file)
+          break
+        case "reply":
+          if (el.data?.id) {
+            form.append("msg_id", String(el.data.id))
+            form.append("message_reference", JSON.stringify({ message_id: String(el.data.id) }))
+          } else if (el.data?.event_id) form.append("event_id", String(el.data.event_id))
+          break
+        default:
+          break
+      }
+    }
+    if (content) form.append("content", content)
+    if (!file) throw new Error("没有可上传的图片数据")
+    form.append("file_image", new Blob([file]), "image.png")
+    const res = await data.bot.sdk.request.post(endpoint, form)
+    return { id: res.data?.id, timestamp: Date.now() / 1000, brief: content }
+  }
+
+  /** multipart 失败时回退：把本地图片转成公网 URL 再走普通发送 */
+  async localImagesToUrl(elements, data) {
+    for (const el of elements) {
+      if (el.type !== "image" || this.isHttpUrl(el.data?.file)) continue
+      try {
+        el.data = { ...el.data, file: String(await Bot.fileToUrl(el.data.file)) }
+      } catch (err) {
+        Bot.makeLog("error", ["频道图片转存公网地址失败", err], data.self_id)
+      }
+    }
+    return elements
+  }
+
+  /** 频道/频道私信发送：legacy 模式优先走 multipart 上传本地图片 */
+  async sendGuildElements(data, msg, kind) {
+    const elements = this.toSdkMessage(msg, data)
+    const legacy = config.markdown[data.self_id] === "legacy"
+    const simple = !elements.some(el =>
+      ["markdown", "keyboard", "button", "ark", "embed"].includes(el.type),
+    )
+    if (legacy && simple && this.hasLocalImage(elements)) {
+      const endpoint =
+        kind === "guild" ? `/channels/${data.channel_id}/messages` : `/dms/${data.guild_id}/messages`
+      try {
+        return await this.sendGuildMultipart(data, elements, endpoint)
+      } catch (err) {
+        Bot.makeLog("warn", ["频道 multipart 发送失败，回退公网 URL", err], data.self_id)
+        await this.localImagesToUrl(elements, data)
+      }
+    }
+    return kind === "guild"
+      ? data.bot.sdk.sendGuildMessage(data.channel_id, elements)
+      : data.bot.sdk.sendDirectMessage(data.guild_id, elements)
   }
 
   async recallMsg(data, recall, message_id) {

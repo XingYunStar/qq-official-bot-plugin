@@ -697,6 +697,79 @@ console.log("\n=== O. master 使用说明 ===")
   }
 }
 
+console.log("\n=== P. 频道 legacy multipart ===")
+{
+  const bot = Bot["10001"]
+  const oldMarkdown = __config.markdown["10001"]
+  __config.markdown["10001"] = "legacy"
+  const guildData = {
+    self_id: "10001",
+    bot,
+    message_type: "group",
+    guild_id: "G1",
+    channel_id: "CH1",
+    message_id: "m1",
+    time: Date.now() / 1000,
+  }
+
+  const msgs = await adapter.makeGuildMsg(guildData, [{ type: "image", file: Buffer.from([1, 2, 3]) }])
+  const imgEl = msgs[0].find(el => el.type === "image")
+  assert("legacy 保留本地图片", Buffer.isBuffer(imgEl?.file), JSON.stringify(msgs[0]))
+
+  const posts = []
+  const oldPost = bot.sdk.request.post
+  const oldSendGuild = bot.sdk.sendGuildMessage
+  let normalSent = 0
+  let lastGuildElements
+  bot.sdk.request.post = async (url, form) => {
+    posts.push({ url, form })
+    return { data: { id: "gm1" } }
+  }
+  bot.sdk.sendGuildMessage = async (channelId, elements) => {
+    normalSent++
+    lastGuildElements = elements
+    return { id: "normal" }
+  }
+
+  const ret = await adapter.sendGuildElements(
+    guildData,
+    [{ type: "reply", id: "m0" }, { type: "text", text: "hi" }, { type: "image", file: Buffer.from([1, 2, 3]) }],
+    "guild",
+  )
+  assert("legacy 走 multipart", posts.length === 1 && posts[0].url === "/channels/CH1/messages", String(posts[0]?.url))
+  assert(
+    "multipart 字段正确",
+    posts[0].form.get("content") === "hi" && posts[0].form.get("msg_id") === "m0",
+    JSON.stringify([...posts[0].form.keys()]),
+  )
+  assert("multipart 包含文件", posts[0].form.get("file_image") instanceof Blob)
+  assert("multipart 返回消息 ID", ret.id === "gm1")
+
+  __config.markdown["10001"] = "raw"
+  posts.length = 0
+  await adapter.sendGuildElements(guildData, [{ type: "text", text: "hi" }], "guild")
+  assert("非 legacy 不走 multipart", posts.length === 0 && normalSent >= 1)
+
+  __config.markdown["10001"] = "legacy"
+  posts.length = 0
+  bot.sdk.request.post = async () => {
+    throw new Error("boom")
+  }
+  const msgs2 = await adapter.makeGuildMsg(guildData, [{ type: "image", file: Buffer.from([1, 2, 3]) }])
+  const before = normalSent
+  const ret2 = await adapter.sendGuildElements(guildData, msgs2[0], "guild")
+  const imgEl2 = lastGuildElements?.find(el => el.type === "image")
+  assert(
+    "multipart 失败回退普通发送",
+    ret2.id === "normal" && normalSent === before + 1 && adapter.isHttpUrl(imgEl2?.data?.file),
+    JSON.stringify(imgEl2?.data?.file),
+  )
+
+  __config.markdown["10001"] = oldMarkdown
+  bot.sdk.request.post = oldPost
+  bot.sdk.sendGuildMessage = oldSendGuild
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }

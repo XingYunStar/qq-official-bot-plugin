@@ -16,7 +16,7 @@
 
 - 适配器 ID、`config/QQBot.yaml`、`data/QQBot/`、`#QQBotxxx` 命令全部沿用旧版，**可以从旧版直接迁移**
 - 收发消息内部仍使用 TRSS 熟悉的扁平消息结构，仅在适配器边界转换成 `qq-official-bot` 的 `{ type, data }`
-- 赠送一个功能测试插件（[example/qqbot-test.js](example/qqbot-test.js)），首次加载自动安装到 `plugins/example/`，方便验证各项能力
+- 赠送一个功能测试插件（[example/qqbot-test.js](example/qqbot-test.js)），首次启动时自动安装到 `plugins/example/`，方便验证各项能力
 
 ## 快速开始
 
@@ -33,9 +33,7 @@ cd qq-official-bot-plugin
 npm install
 ```
 
-也可以在 TRSS 里输入 `#安装qq-official-bot-plugin`（前提：已把本仓库加入 `plugins/other/install.js` 的安装列表；安装后仍需在插件目录执行一次 `npm install`）。
-
-**移除/停用旧的 `QQBot-Plugin`** 后重启 TRSS-Yunzai。两个插件都使用 `QQBot` 作为适配器 ID，不能同时启用；同时存在时本插件会自动跳过连接并报错。
+**移除/停用旧的 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)** 后重启 TRSS-Yunzai。两个插件都使用 `QQBot` 作为适配器 ID，不能同时启用；同时存在时本插件会自动跳过连接并报错。
 
 ### 3. 创建机器人
 
@@ -48,45 +46,52 @@ npm install
 
 输入：
 
-```
-#QQBot设置机器人QQ号:AppID:Token:AppSecret:[012]:[01]
+```text
+#QQBot设置机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
+#QQBot设置机器人QQ号:AppID:Token:AppSecret:2     # WebHook 模式
 ```
 
 格式示例：
 
-- 机器人QQ号 `114`、AppID `514`、Token `1919`、AppSecret `810`、群Bot、频道私域
+- 机器人QQ号 `3889012345`、AppID `102345678`、Token `AbCdEfGhIjKlMnOpQrStUvWxYz123432`、AppSecret `aBcDeFgHiJkLmNoPqRsTuVwXyZ123432`、群Bot `1`、频道私域 `0`
 
 ```
-#QQBot设置114:514:1919:810:1:1
+#QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:1:0
 ```
 
-- WebHook 模式（需要启用公网 HTTPS，并在开放平台添加回调地址 `url/QQBot`）
+- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com)添加回调地址 `<url>/QQBot`）
 
 ```
-#QQBot设置114:514:1919:810:2
+#QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
 ```
 
 ### 5. 发送图片 / MD 消息
 
-使用 MD 按钮消息 / MD 消息，或发送本地图片，都需要一个公网可访问的地址：
+- **不想用 MD 消息，或没有公网地址，可切换普通消息：**
 
-1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址（**域名或 IP 都可以**），浏览器打开该地址，后台日志应出现访问请求。
-2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址：
-   `http://<TRSS内网IP>:2536`
-   内网 IP 可用下面命令查看：
+```
+#QQBotMD机器人QQ号:legacy
+```
+
+> legacy（普通消息）模式下，频道/频道私信的本地图片会走 **multipart 上传**，不需要公网地址；群聊/单聊图片本来就走上行接口，也不需要。
+
+- **使用 MD 按钮消息 / MD 消息（含本地图片）时，需要一个公网可访问的地址：**
+
+1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址 **域名或 IP**（需放行 2536 端口，或反向代理到 TRSS 的内网地址），浏览器打开该地址，后台日志应出现访问请求。
+2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址 `http://<TRSS内网IP>:2536`；docker 容器 TRSS 的内网 IP 可用下面命令查看（把 `TRSS` 换成你的容器名）：
 
    ```bash
    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' TRSS
    ```
 
-3. 需要公网 HTTPS（Webhook 必须）时，在 `config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`。
-4. 如果图片加载失败，可以限制图片大小：`#QQBot图片限制2/1/0.5...`（单位 MB）。
-5. 临时不想用 MD 消息，可切换普通消息：`#QQBotMD机器人QQ号:legacy`。
+3. 如果图片加载失败，可以限制图片大小：`#QQBot图片限制2`（单位 MB，默认 3）。
 
-`server.yaml` 示例（把域名/IP、端口换成自己的）：
+> 说明：`url` 用于拼接图片等资源地址，必须是 QQ 能访问到的公网地址；只填 IP 时用 `http://IP:2536`。
+
+`server.yaml` 示例（把域名/IP换成自己的）：
 
 ```yaml
-# 服务器地址（公网可访问；MD 消息/本地图片必须）
+# 服务器地址（公网可访问；MD 消息中的图片必须，legacy 频道图片走 multipart 不需要）
 url: http://bot.example.com
 # 服务器端口
 port: 2536
@@ -102,17 +107,15 @@ https:
   # cert: config/localhost.crt
 ```
 
-> 说明：`url` 用于拼接图片等资源地址，必须是 QQ 能访问到的公网地址；只填 IP 时直接用 `http://IP:2536`；填域名时由宿主机反向代理到 `http://TRSS内网IP:2536` 即可。
-
 ### 6. 基础命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `#QQBot账号` | 列出已配置账号 |
-| `#QQBot设置 + 机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域` | 添加/删除账号（是 1 否 0） |
+| `#QQBot设置机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域` | 添加/删除账号（是 1 否 0） |
 | `#QQBot设置...:2` | 使用 Webhook 模式 |
-| `#QQBotMD + 机器人QQ号:raw/inline/legacy` | MD按钮消息 / MD消息 / 普通消息 |
-| `#QQBot图片限制 + 数字` | 图片大小限制（MB，默认 3） |
+| `#QQBotMD机器人QQ号:raw/inline/legacy` | MD按钮消息 / MD消息 / 普通消息 |
+| `#QQBot图片限制2` | 图片大小限制（MB，默认 3） |
 | `#QQBot重连 [QQ号]` | 手动重连 |
 | `#QQBot绑定用户QQ号` | 绑定按钮回调用户 |
 
@@ -127,6 +130,7 @@ https:
 | **群通知** | 成员进群/退群 → `notice.group.increase/decrease`；入群申请 → `notice.group.join_request`；机器人被拉群 → `notice.group.bot.increase` |
 | **成员身份 / 昵称** | 优先使用消息事件 `author` / `mentions` 自带的 `member_role`、`username`，不依赖需要申请权限的「群成员详情」接口（接口报 `11253` 时自动回退） |
 | **入群审批** | 通过 `qq-official-bot` 的入群申请接口查询、同意、拒绝 |
+| **频道图片** | legacy（普通消息）模式支持 **multipart `file_image`** 直传，不依赖公网 URL；MD 模式仍转公网 URL |
 | **URL 处理** | `toQRCode: true` 转二维码（旧行为）、`"link"` 转 Markdown 链接 `[host](url)`、`false` 原样发送 |
 | **稳定性** | 断线退避重连、心跳超时探测、access_token 失败无限重试、重复连接清理、与旧插件冲突时自动跳过连接 |
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
@@ -134,7 +138,7 @@ https:
 
 ## 配置
 
-沿用旧版的 `config/QQBot.yaml`，不需要重新配置账号。
+沿用旧版的 `TRSS-Yunzai/config/QQBot.yaml`，不需要重新配置账号。
 
 ```yaml
 # 机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
@@ -165,12 +169,13 @@ markdown:
 | `toQRCode` | URL 处理方式：`true` 二维码、`"link"` Markdown 链接、`false` 原样 |
 | `markdown` | `机器人QQ号: raw / inline / legacy / 模板ID` |
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
+| `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
 | `reconnect` | 重连/心跳参数，同旧版 |
 | 其余 | `toCallback` / `toBotUpload` / `hideGuildRecall` / `imageLength` / `permission` 同旧版 |
 
 ## 测试插件（example/qqbot-test.js）
 
-**不会**作为适配器加载，安装插件后首次启动会自动复制到 `TRSS-Yunzai/plugins/example/qqbot-test.js`（TRSS 会把 `example/` 下的 `.js` 当作独立插件加载）。也可以在仓库里手动下载该文件放到 `plugins/example/`。
+**不会随适配器一起加载**；复制到 `plugins/example/` 后由 TRSS 作为独立插件加载。安装插件后首次启动会自动复制到 `TRSS-Yunzai/plugins/example/qqbot-test.js`（如果该文件已存在则不会覆盖，更新测试插件请手动替换）。也可以在仓库里手动下载该文件放到 `plugins/example/`。
 
 加载后发送 `#qqbot测试` 查看全部命令：
 
@@ -195,7 +200,7 @@ markdown:
 
 首次自动安装（或首次启动且尚未发送过）时，插件会向 **master** 发送一条单聊使用说明，发送成功后写入 `exampleGuideSent`，之后不会重复打扰。
 
-master 来自 `config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
+master 来自 `TRSS-Yunzai/config/config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
 
 ```yaml
 master:
@@ -211,7 +216,7 @@ master:
 - 鉴权：只需 AppID + AppSecret；旧 Token 字段保留但不再使用
 - Intents：`GROUP_AT_MESSAGE_CREATE` + `C2C_MESSAGE_CREATE` 合并为 `GROUP_AND_C2C_EVENT`
 - Webhook：仍是 `/QQBot` 单路由，签名改用 Ed25519
-- 频道/频道私信图片：本地图片会先转公网 URL（需要 `config/server.yaml` 的 `url` 可被 QQ 访问）
+- 频道/频道私信图片：legacy（普通消息）模式走 multipart `file_image` 上传，不需要公网 URL；MD 模式会先转公网 URL（需要 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 可被 QQ 访问）
 - 消息元素：插件内部仍是扁平结构，收发边界自动转换，对上层透明
 
 ## 已知限制
@@ -219,7 +224,7 @@ master:
 - 「群成员详情」接口需要开放平台权限，未申请时返回 `11253`；身份/昵称会回退到消息事件字段
 - QQ 官方接口只能撤回**机器人自己发送的消息**；引用别人消息时只能读内容，不能撤回
 - 引用机器人自己的旧消息时，若平台只给 `REFIDX` 索引且本进程没有记录 `ref_idx`，则无法还原真实消息 ID（重启后旧记录丢失）
-- 群内全量消息需要群主在开放平台开启「接收所有消息」
+- 群内全量消息需要在群设置中由群主开启「接收所有消息」
 
 ## 测试
 
@@ -227,10 +232,10 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（94 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（101 条断言）。
 
 ## 致谢
 
-- 旧版插件作者：[时雨🌌星空](https://github.com/TimeRainStarSky)
+- 旧版插件作者：[时雨🌌星空](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)
 - SDK：[qq-official-bot](https://github.com/zhinjs/qq-official-bot)（凉菜）
 - QQ 群：[1046894467](https://qm.qq.com/q/WdZoPbyPsI)
