@@ -6,6 +6,9 @@
  * - 发送消息时拦截 sdk.sendGroupMessage 等，检查元素结构转换
  */
 import * as nodeModule from "node:module"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 
 const logs = []
 const events = []
@@ -55,6 +58,14 @@ globalThis.Bot = {
   express: { use: () => {}, quiet: [] },
   sleep: async (ms, promise) => promise,
   getMap: async () => new Map(),
+  fsStat: async p => {
+    try {
+      await fs.access(p)
+      return true
+    } catch {
+      return false
+    }
+  },
   Buffer: async file => (Buffer.isBuffer(file) ? file : Buffer.from(String(file))),
   String: v => String(v),
   fileToUrl: async file => new URL("https://example.com/File/test.png"),
@@ -636,6 +647,25 @@ console.log("\n=== M. 群引用发送 / 引用索引 ===")
     JSON.stringify(d?.message?.[0]),
   )
   assert("Robot 自己消息的引用内容可读", adapter.pickGroup("10001", "10001:GROUP_1").getMsg("ROBOT1.0_sent")?.raw_message === "机器人自己发的内容")
+}
+
+console.log("\n=== N. 测试插件自动安装 ===")
+{
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "qqbot-example-"))
+  const cwd = process.cwd()
+  process.chdir(tmp)
+  try {
+    const first = await adapter.ensureExamplePlugin()
+    const target = path.join("plugins", "example", "qqbot-test.js")
+    assert("首次启动安装测试插件", first === true && (await Bot.fsStat(target)))
+    const content = await fs.readFile(target, "utf8")
+    assert("安装内容正确", content.includes("QQBot 适配器功能测试插件"), content.slice(0, 30))
+    const second = await adapter.ensureExamplePlugin()
+    assert("已安装时不重复安装", second === false)
+  } finally {
+    process.chdir(cwd)
+    await fs.rm(tmp, { recursive: true, force: true })
+  }
 }
 
 console.log("\n=== I. 冲突保护 / 退出 ===")
