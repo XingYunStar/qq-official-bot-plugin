@@ -18,6 +18,104 @@
 - 收发消息内部仍使用 TRSS 熟悉的扁平消息结构，仅在适配器边界转换成 `qq-official-bot` 的 `{ type, data }`
 - 赠送一个功能测试插件（[example/qqbot-test.js](example/qqbot-test.js)），首次加载自动安装到 `plugins/example/`，方便验证各项能力
 
+## 快速开始
+
+### 1. 准备
+
+安装并启动 [TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai)（Node.js **>= 20.12**）。
+
+### 2. 安装插件
+
+```bash
+cd TRSS-Yunzai/plugins
+git clone https://github.com/XingYunStar/qq-official-bot-plugin.git
+cd qq-official-bot-plugin
+npm install
+```
+
+也可以在 TRSS 里输入 `#安装qq-official-bot-plugin`（前提：已把本仓库加入 `plugins/other/install.js` 的安装列表；安装后仍需在插件目录执行一次 `npm install`）。
+
+**移除/停用旧的 `QQBot-Plugin`** 后重启 TRSS-Yunzai。两个插件都使用 `QQBot` 作为适配器 ID，不能同时启用；同时存在时本插件会自动跳过连接并报错。
+
+### 3. 创建机器人
+
+打开 [QQ 开放平台](https://q.qq.com) 创建 Bot：
+
+1. 创建机器人
+2. 开发设置 → 得到 `机器人QQ号:AppID:Token:AppSecret`
+
+### 4. 配置账号
+
+输入：
+
+```
+#QQBot设置机器人QQ号:AppID:Token:AppSecret:[012]:[01]
+```
+
+格式示例：
+
+- 机器人QQ号 `114`、AppID `514`、Token `1919`、AppSecret `810`、群Bot、频道私域
+
+```
+#QQBot设置114:514:1919:810:1:1
+```
+
+- WebHook 模式（需要启用公网 HTTPS，并在开放平台添加回调地址 `url/QQBot`）
+
+```
+#QQBot设置114:514:1919:810:2
+```
+
+### 5. 发送图片 / MD 消息
+
+使用 MD 按钮消息 / MD 消息，或发送本地图片，都需要一个公网可访问的地址：
+
+1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址（**域名或 IP 都可以**），浏览器打开该地址，后台日志应出现访问请求。
+2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址：
+   `http://<TRSS内网IP>:2536`
+   内网 IP 可用下面命令查看：
+
+   ```bash
+   docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' TRSS
+   ```
+
+3. 需要公网 HTTPS（Webhook 必须）时，在 `config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`。
+4. 如果图片加载失败，可以限制图片大小：`#QQBot图片限制2/1/0.5...`（单位 MB）。
+5. 临时不想用 MD 消息，可切换普通消息：`#QQBotMD机器人QQ号:legacy`。
+
+`server.yaml` 示例（把域名/IP、端口换成自己的）：
+
+```yaml
+# 服务器地址（公网可访问；MD 消息/本地图片必须）
+url: http://bot.example.com
+# 服务器端口
+port: 2536
+# 服务器缺省跳转地址
+redirect: https://qm.qq.com/q/WdZoPbyPsI
+# 服务器鉴权
+auth: # Authorization: Bearer <access_token>
+
+https:
+  # url: https://localhost:2537
+  # port: 2537
+  # key: config/localhost.key
+  # cert: config/localhost.crt
+```
+
+> 说明：`url` 用于拼接图片等资源地址，必须是 QQ 能访问到的公网地址；只填 IP 时直接用 `http://IP:2536`；填域名时由宿主机反向代理到 `http://TRSS内网IP:2536` 即可。
+
+### 6. 基础命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `#QQBot账号` | 列出已配置账号 |
+| `#QQBot设置 + 机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域` | 添加/删除账号（是 1 否 0） |
+| `#QQBot设置...:2` | 使用 Webhook 模式 |
+| `#QQBotMD + 机器人QQ号:raw/inline/legacy` | MD按钮消息 / MD消息 / 普通消息 |
+| `#QQBot图片限制 + 数字` | 图片大小限制（MB，默认 3） |
+| `#QQBot重连 [QQ号]` | 手动重连 |
+| `#QQBot绑定用户QQ号` | 绑定按钮回调用户 |
+
 ## 新版支持了什么
 
 | 能力 | 说明 |
@@ -33,23 +131,6 @@
 | **稳定性** | 断线退避重连、心跳超时探测、access_token 失败无限重试、重复连接清理、与旧插件冲突时自动跳过连接 |
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
 | **测试插件自动安装** | 首次启动把 `example/qqbot-test.js` 复制到 `plugins/example/`，并向 master 发送使用说明（单聊） |
-
-## 安装
-
-1. 放到 TRSS-Yunzai 的插件目录：
-
-   ```bash
-   cd TRSS-Yunzai/plugins
-   git clone https://github.com/XingYunStar/qq-official-bot-plugin.git
-   cd qq-official-bot-plugin
-   npm install
-   ```
-
-2. **移除/停用旧的 `QQBot-Plugin`**（两个插件都用 `QQBot` 作为适配器 ID，不能同时启用；同时存在时本插件会自动跳过连接并报错）。
-
-3. 重启 TRSS-Yunzai。
-
-要求：Node.js **>= 20.12**（`qq-official-bot` 的要求）。
 
 ## 配置
 
@@ -87,20 +168,6 @@ markdown:
 | `reconnect` | 重连/心跳参数，同旧版 |
 | 其余 | `toCallback` / `toBotUpload` / `hideGuildRecall` / `imageLength` / `permission` 同旧版 |
 
-## 命令
-
-与原 `QQBot-Plugin` 一致：
-
-| 命令 | 说明 |
-| --- | --- |
-| `#QQBot账号` | 列出已配置账号 |
-| `#QQBot设置QQ号:AppID:Token:AppSecret:1:0` | 添加/删除账号 |
-| `#QQBot设置...:2` | 使用 Webhook 模式 |
-| `#QQBot重连 [QQ号]` | 手动重连 |
-| `#QQBotMD机器人QQ号:raw/inline/legacy/模板ID` | 设置 Markdown 模式 |
-| `#QQBot图片限制数字` | 图片大小限制（MB） |
-| `#QQBot绑定用户QQ号` | 绑定按钮回调用户 |
-
 ## 测试插件（example/qqbot-test.js）
 
 **不会**作为适配器加载，安装插件后首次启动会自动复制到 `TRSS-Yunzai/plugins/example/qqbot-test.js`（TRSS 会把 `example/` 下的 `.js` 当作独立插件加载）。也可以在仓库里手动下载该文件放到 `plugins/example/`。
@@ -126,7 +193,9 @@ markdown:
 
 ### master 单聊通知
 
-首次自动安装（或首次启动且尚未发送过）时，插件会向 **master** 发送一条单聊使用说明，发送成功后写入 `exampleGuideSent`，之后不会重复打扰。master 来自 `config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
+首次自动安装（或首次启动且尚未发送过）时，插件会向 **master** 发送一条单聊使用说明，发送成功后写入 `exampleGuideSent`，之后不会重复打扰。
+
+master 来自 `config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
 
 ```yaml
 master:
@@ -158,7 +227,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、群管理 API、通知、重连、冲突保护等（94 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（94 条断言）。
 
 ## 致谢
 
