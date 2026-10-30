@@ -46,36 +46,51 @@ npm install
 
 输入：
 
-```text
-#QQBot设置机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
-#QQBot设置机器人QQ号:AppID:Token:AppSecret:2     # WebHook 模式
-```
+#QQBot设置`机器人QQ号`:`AppID`:`Token`:`AppSecret`:`是否群Bot（是1/否0/WebHook 模式 2）`:`是否频道私域（是1 否0）`
+
 
 格式示例：
 
-- 机器人QQ号 `3889012345`、AppID `102345678`、Token `AbCdEfGhIjKlMnOpQrStUvWxYz123432`、AppSecret `aBcDeFgHiJkLmNoPqRsTuVwXyZ123432`、群Bot `1`、频道私域 `0`
+> 机器人QQ号 `3889012345`、AppID `102345678`、Token `AbCdEfGhIjKlMnOpQrStUvWxYz123432`、AppSecret `aBcDeFgHiJkLmNoPqRsTuVwXyZ123432`、群Bot `1`、频道私域 `0`
+
+- WebSocket 模式（推荐）
 
 ```
 #QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:1:0
 ```
 
-- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com)添加回调地址 `<url>/QQBot`）
+- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
 
 ```
 #QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
 ```
 
-### 5. 发送图片 / MD 消息
 
-- **不想用 MD 消息，或没有公网地址，可切换普通消息：**
+### 5. 发送图片 / MD 消息
+<details>
+<summary>不想用 MD 消息，或没有公网地址，可切换普通消息</summary>
+
 
 ```
 #QQBotMD机器人QQ号:legacy
 ```
 
 > legacy（普通消息）模式下，频道/频道私信的本地图片会走 **multipart 上传**，不需要公网地址；群聊/单聊图片本来就走上行接口，也不需要。
+</details>
 
-- **使用 MD 按钮消息 / MD 消息（含本地图片）时，需要一个公网可访问的地址：**
+
+<details>
+<summary>使用 MD 按钮消息 / MD 消息</summary>
+
+```
+#QQBotMD机器人QQ号:raw
+```
+或
+```
+#QQBotMD机器人QQ号:inline
+```
+
+>  raw / inline（MD 按钮消息 / MD 消息）模式下**需要一个公网可访问的地址**：
 
 1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址 **域名或 IP**（需放行 2536 端口，或反向代理到 TRSS 的内网地址），浏览器打开该地址，后台日志应出现访问请求。
 2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址 `http://<TRSS内网IP>:2536`；docker 容器 TRSS 的内网 IP 可用下面命令查看（把 `TRSS` 换成你的容器名）：
@@ -106,6 +121,7 @@ https:
   # key: config/localhost.key
   # cert: config/localhost.crt
 ```
+</details>
 
 ### 6. 基础命令
 
