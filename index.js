@@ -81,6 +81,7 @@ const { config, configSave } = await makeConfig(
     hideGuildRecall: false,
     imageLength: 3,
     autoInstallExample: true,
+    exampleGuideSent: false,
     markdown: {
       template: "abcdefghij",
     },
@@ -2417,9 +2418,19 @@ const adapter = new (class QQBotAdapter {
       // 连接失败（如开机时网络未就绪）时，等本次连接流程结束后在后台重试
       connect.then(ok => !ok && this.retryConnect(token))
     }
-    // 首次安装测试插件后，给 master 发一份使用说明（等连接就绪）
-    if (installedExample) {
-      const timer = setTimeout(() => this.sendExampleGuide().catch(() => {}), 15000)
+    // 首次安装（或首次启动）后，给 master 发一份使用说明（等连接就绪）
+    const needGuide = installedExample || config.exampleGuideSent !== true
+    if (needGuide) {
+      const timer = setTimeout(async () => {
+        try {
+          if (await this.sendExampleGuide()) {
+            config.exampleGuideSent = true
+            await configSave()
+          }
+        } catch (err) {
+          Bot.makeLog("error", ["发送测试插件说明失败", err], this.id)
+        }
+      }, 15000)
       timer.unref?.()
     }
   }
@@ -2455,6 +2466,7 @@ const adapter = new (class QQBotAdapter {
 
   /** 向 master 发送测试插件的使用说明（单聊） */
   async sendExampleGuide() {
+    let sent = false
     const text = [
       "QQBot 适配器测试插件已安装：plugins/example/qqbot-test.js",
       "发送 #qqbot测试 查看全部命令，常用：",
@@ -2491,11 +2503,13 @@ const adapter = new (class QQBotAdapter {
           await Bot[id].sdk.sendPrivateMessage(this.rawId(uid), [
             { type: "text", data: { text } },
           ])
+          sent = true
           Bot.makeLog("mark", `已向 master ${uid} 发送测试插件使用说明`, id)
         } catch (err) {
           Bot.makeLog("warn", [`向 master ${uid} 发送说明失败`, err?.message || err], id)
         }
     }
+    return sent
   }
 })()
 

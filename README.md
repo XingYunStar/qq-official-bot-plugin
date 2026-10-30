@@ -126,7 +126,7 @@ markdown:
 
 ### master 单聊通知
 
-首次自动安装测试插件后，插件会向 **master** 发送一条单聊使用说明。master 来自 `config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
+首次自动安装（或首次启动且尚未发送过）时，插件会向 **master** 发送一条单聊使用说明，发送成功后写入 `exampleGuideSent`，之后不会重复打扰。master 来自 `config/other.yaml` 的 `master` 配置（按机器人 ID 分组）：
 
 ```yaml
 master:
@@ -158,7 +158,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、群管理 API、通知、重连、冲突保护等（91 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、群管理 API、通知、重连、冲突保护等（94 条断言）。
 
 ## 致谢
 

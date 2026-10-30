@@ -668,6 +668,35 @@ console.log("\n=== N. 测试插件自动安装 ===")
   }
 }
 
+console.log("\n=== O. master 使用说明 ===")
+{
+  const mainCfg = (await import("./stub-main-config.mjs")).default
+  const bot = Bot["10001"]
+  const calls = []
+  const oldSend = bot.sdk.sendPrivateMessage
+  bot.sdk.sendPrivateMessage = async (uid, msg) => calls.push({ uid, msg })
+  Bot.uin.push("10001")
+  try {
+    mainCfg.master["10001"] = ["MASTER_OPENID"]
+    const ok = await adapter.sendExampleGuide()
+    assert("向 master 发送使用说明", ok === true && calls[0]?.uid === "MASTER_OPENID", JSON.stringify(calls[0]?.uid))
+    assert(
+      "说明内容包含测试命令",
+      JSON.stringify(calls[0]?.msg || "").includes("#qqbot测试"),
+      JSON.stringify(calls[0]?.msg || "").slice(0, 80),
+    )
+
+    calls.length = 0
+    delete mainCfg.master["10001"]
+    const none = await adapter.sendExampleGuide()
+    assert("没有 master 时不发送", none === false && calls.length === 0)
+  } finally {
+    bot.sdk.sendPrivateMessage = oldSend
+    Bot.uin.pop()
+    delete mainCfg.master["10001"]
+  }
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
