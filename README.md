@@ -30,8 +30,24 @@
 cd TRSS-Yunzai/plugins
 git clone https://github.com/XingYunStar/qq-official-bot-plugin.git
 cd qq-official-bot-plugin
-npm install
+pnpm install
 ```
+<details>
+<summary>如果在pnpm install出现 报错</summary>
+
+```
+[WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.onlyBuiltDependencies", "pnpm.patchedDependencies". See https://pnpm.io/settings for the new home of each setting.
+[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: sharp@0.34.5
+
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+```
+输入以下命令重新pnpm install即可解决
+```bash
+pnpm approve-builds sharp
+pnpm install
+```
+
+</details>
 
 **移除/停用旧的 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)** 后重启 TRSS-Yunzai。两个插件都使用 `QQBot` 作为适配器 ID，不能同时启用；同时存在时本插件会自动跳过连接并报错。
 
