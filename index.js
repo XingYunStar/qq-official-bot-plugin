@@ -49,6 +49,12 @@ QQBotMessage.parse = (parse =>
     return parse.call(this, payload)
   })(QQBotMessage.parse)
 
+/** 引用索引持久化：收到的消息 24 小时，机器人自己发的消息 7 天 */
+const REF_TTL_RECV = 24 * 60 * 60 * 1000
+const REF_TTL_SENT = 7 * 24 * 60 * 60 * 1000
+const REF_CLEAN_INTERVAL = 10 * 60 * 1000
+const REF_COMPACT_INTERVAL = 60 * 60 * 1000
+
 /** 断线重连 / 心跳超时探测默认配置 */
 const reconnectDefault = {
   /** 是否启用断线自动重连与心跳超时探测 */
@@ -142,10 +148,12 @@ const adapter = new (class QQBotAdapter {
     this.retryTask = {}
     this.msgSeen = new Map()
     this.msgCache = new Map()
-    this.msgIndex = new Map()
-    this.msgIdxById = new Map()
-    this.refIdxMap = new Map()
-    this.sentRefs = new Map()
+    this.refStore = {}
+    this.refById = {}
+    this.refFile = {}
+    this.refWrite = {}
+    this.refLastCompact = {}
+    this.refTimer = {}
     this.sentMsgs = new Map()
   }
 
@@ -210,8 +218,8 @@ const adapter = new (class QQBotAdapter {
       const scene = this.parseMessageScene(data.raw)
       if (scene.msg_idx) return scene.msg_idx
     }
-    if (this.sentRefs.has(id)) return this.sentRefs.get(id)
-    if (this.msgIdxById.has(id)) return this.msgIdxById.get(id)
+    const known = this.refOf(data?.self_id, id)
+    if (known) return known
     if (data?.self_id)
       Bot.makeLog(
         "warn",
@@ -1281,6 +1289,128 @@ const adapter = new (class QQBotAdapter {
     return id.replace(/^\d+:/, "").replace(/^qg_/, "")
   }
 
+  /**
+   * 引用索引持久化（data/QQBot/<机器人QQ号>/refmap.ndjson）
+   * 记录 REFIDX(msg_idx/ref_idx) → 真实 message_id：
+   * - 收到的消息保留 24 小时（用于引用、撤回）
+   * - 机器人自己发的消息保留 7 天
+   */
+  refFilePath(id) {
+    return path.join(this.path, id, "refmap.ndjson")
+  }
+
+  /** 串行写文件，避免 append 与 compact 互相穿插 */
+  refQueue(id, task) {
+    const prev = this.refWrite[id] || Promise.resolve()
+    this.refWrite[id] = prev
+      .then(task)
+      .catch(err => Bot.makeLog("error", ["引用索引写入失败", err], id))
+    return this.refWrite[id]
+  }
+
+  async initRefStore(id) {
+    if (this.refStore[id]) return
+    const forward = (this.refStore[id] = new Map())
+    const reverse = (this.refById[id] = new Map())
+    const file = (this.refFile[id] = this.refFilePath(id))
+    this.refLastCompact[id] = 0
+    let dropped = 0
+    try {
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      const text = await fs.readFile(file, "utf8").catch(() => "")
+      const now = Date.now()
+      for (const line of text.split("\n")) {
+        if (!line) continue
+        try {
+          const r = JSON.parse(line)
+          if (!r?.i || !r?.m) continue
+          if (r.t + (r.s ? REF_TTL_SENT : REF_TTL_RECV) < now) {
+            dropped++
+            continue
+          }
+          forward.set(r.i, r)
+          reverse.set(r.m, r.i)
+        } catch {}
+      }
+      // 启动时整理一次：清掉过期/损坏行，避免文件无限增长
+      await this.compactRefStore(id)
+    } catch (err) {
+      Bot.makeLog("error", ["引用索引加载失败", err], id)
+    }
+    if (dropped) Bot.makeLog("debug", [`引用索引：清理 ${dropped} 条过期记录`], id)
+    const timer = setInterval(
+      () => this.cleanupRefStore(id).catch(() => {}),
+      REF_CLEAN_INTERVAL,
+    )
+    timer.unref?.()
+    this.refTimer[id] = timer
+  }
+
+  compactRefStore(id) {
+    const forward = this.refStore[id]
+    const file = this.refFile[id]
+    if (!forward || !file) return Promise.resolve()
+    return this.refQueue(id, async () => {
+      const lines = []
+      for (const r of forward.values()) lines.push(JSON.stringify(r))
+      const tmp = `${file}.tmp`
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      await fs.writeFile(tmp, lines.length ? `${lines.join("\n")}\n` : "")
+      await fs.rename(tmp, file)
+      this.refLastCompact[id] = Date.now()
+    })
+  }
+
+  recordRef(id, refIdx, messageId, sent = false) {
+    if (!refIdx || !messageId) return
+    const forward = this.refStore[id]
+    if (!forward || forward.has(refIdx)) return
+    const r = { i: refIdx, m: messageId, t: Date.now() }
+    if (sent) r.s = 1
+    forward.set(refIdx, r)
+    this.refById[id].set(messageId, refIdx)
+    const line = JSON.stringify(r) + "\n"
+    this.refQueue(id, () => fs.appendFile(this.refFile[id], line))
+  }
+
+  lookupRef(id, refIdx) {
+    const r = this.refStore[id]?.get(refIdx)
+    if (!r) return null
+    if (r.t + (r.s ? REF_TTL_SENT : REF_TTL_RECV) < Date.now()) return null
+    return r
+  }
+
+  refOf(id, messageId) {
+    return this.refById[id]?.get(messageId) || null
+  }
+
+  async cleanupRefStore(id) {
+    const forward = this.refStore[id]
+    if (!forward) return
+    const now = Date.now()
+    let dropped = 0
+    for (const [i, r] of forward) {
+      if (r.t + (r.s ? REF_TTL_SENT : REF_TTL_RECV) >= now) continue
+      forward.delete(i)
+      const reverse = this.refById[id]
+      if (reverse?.get(r.m) === i) reverse.delete(r.m)
+      dropped++
+    }
+    if (!dropped) return
+    const due = now - (this.refLastCompact[id] || 0) > REF_COMPACT_INTERVAL
+    if (due || dropped > forward.size * 0.3) await this.compactRefStore(id)
+  }
+
+  destroyRefStore(id) {
+    clearInterval(this.refTimer?.[id])
+    delete this.refTimer[id]
+    delete this.refStore[id]
+    delete this.refById[id]
+    delete this.refFile[id]
+    delete this.refWrite[id]
+    delete this.refLastCompact[id]
+  }
+
   /** 缓存最近收到的消息，供 getMsg / e.getReply() 使用 */
   cacheMessage(data) {
     if (!data?.message_id) return
@@ -1298,15 +1428,8 @@ const adapter = new (class QQBotAdapter {
     if (data.group_id) this.msgCache.set(`g:${this.rawId(data.group_id)}:${data.message_id}`, entry)
     if (data.user_id) this.msgCache.set(`u:${this.rawId(data.user_id)}:${data.message_id}`, entry)
     const scene = this.parseMessageScene(data.raw)
-    if (scene.msg_idx) {
-      this.msgIndex.set(scene.msg_idx, entry)
-      this.msgIdxById.set(data.message_id, scene.msg_idx)
-    }
-    if (this.msgIndex.size > 500)
-      for (const [k, v] of this.msgIndex) if (v.expire < now) this.msgIndex.delete(k)
-    if (this.msgIdxById.size > 500)
-      for (const [k, v] of this.msgIdxById)
-        if (!this.msgIndex.has(v)) this.msgIdxById.delete(k)
+    // 持久化 REFIDX(msg_idx) → 真实消息 ID（24 小时）
+    if (scene.msg_idx) this.recordRef(data.self_id, scene.msg_idx, data.message_id)
     if (this.msgCache.size > 500)
       for (const [k, v] of this.msgCache) if (v.expire < now) this.msgCache.delete(k)
   }
@@ -1324,7 +1447,7 @@ const adapter = new (class QQBotAdapter {
 
   getCachedMsg(type, scope, message_id) {
     const key = `${type}:${this.rawId(scope)}:${message_id}`
-    let entry = this.msgCache.get(key) || this.msgIndex.get(message_id)
+    const entry = this.msgCache.get(key)
     if (!entry || entry.expire < Date.now()) {
       this.msgCache.delete(key)
       return null
@@ -1357,8 +1480,8 @@ const adapter = new (class QQBotAdapter {
     if (!quote) return
     const scene = this.parseMessageScene(event)
     const refIdx = quote.msg_idx || quote.msgIdx || scene.ref_msg_idx
-    const cached = refIdx ? this.msgIndex.get(refIdx) || this.refIdxMap.get(refIdx) : null
-    const quote_id = cached?.message_id || refIdx
+    const known = refIdx ? this.lookupRef(id, refIdx) : null
+    const quote_id = known?.m || refIdx
     if (!quote_id) return
     const content = typeof quote.content === "string" ? quote.content : ""
     const gid = event.group_id ?? event.group_openid
@@ -1366,17 +1489,13 @@ const adapter = new (class QQBotAdapter {
       message_id: quote_id,
       raw_message: content,
       message: content ? [{ type: "text", text: content }] : [],
-      sender: cached?.sender || (cached?.sent ? { user_id: id } : undefined),
-      time: cached?.time || Math.floor(Date.now() / 1000),
+      sender: known?.s ? { user_id: id } : undefined,
+      time: Math.floor(Date.now() / 1000),
       group_id: gid ? `${id}${this.sep}${gid}` : undefined,
-      user_id: cached?.user_id,
       expire: Date.now() + 10 * 60 * 1000,
       quoted: true,
     }
-    if (gid) {
-      this.msgCache.set(`g:${this.rawId(gid)}:${quote_id}`, entry)
-      if (refIdx && !this.msgIndex.has(refIdx)) this.msgIndex.set(refIdx, entry)
-    }
+    if (gid) this.msgCache.set(`g:${this.rawId(gid)}:${quote_id}`, entry)
     data.quote_content = content
     data.message.unshift({ type: "reply", id: quote_id })
   }
@@ -2412,6 +2531,8 @@ const adapter = new (class QQBotAdapter {
       callback: {},
     }
 
+    await this.initRefStore(id)
+
     Bot[id].sdk.logger = {}
     for (const i of ["trace", "debug", "info", "mark", "warn", "error", "fatal"])
       Bot[id].sdk.logger[i] = (...args) => {
@@ -2424,21 +2545,7 @@ const adapter = new (class QQBotAdapter {
     Bot[id].sdk.request.interceptors.response.use(res => {
       const d = res?.data
       const ref_idx = d?.ext_info?.ref_idx
-      if (d?.id && ref_idx) {
-        this.sentRefs.set(d.id, ref_idx)
-        this.refIdxMap.set(ref_idx, {
-          message_id: d.id,
-          raw_message: "",
-          message: [],
-          sender: { user_id: id },
-          time: Date.now() / 1000,
-          expire: Date.now() + 2 * 60 * 60 * 1000,
-          sent: true,
-        })
-        if (this.sentRefs.size > 500)
-          for (const [k, v] of this.sentRefs)
-            if (!this.refIdxMap.has(v)) this.sentRefs.delete(k)
-      }
+      if (d?.id && ref_idx) this.recordRef(id, ref_idx, d.id, true)
       return res
     })
 

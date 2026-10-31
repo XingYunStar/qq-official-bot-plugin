@@ -15,6 +15,10 @@ const events = []
 const sends = []
 const started = []
 
+const originalCwd = process.cwd()
+const testWorkDir = await fs.mkdtemp(path.join(os.tmpdir(), "qqbot-work-"))
+process.chdir(testWorkDir)
+
 process.on("unhandledRejection", err => {
   console.log("[unhandledRejection]", err?.stack || err)
   process.exitCode = 1
@@ -585,8 +589,11 @@ console.log("\n=== M. 群引用发送 / 引用索引 ===")
   assert("引用本条消息转换为 msg_idx", out[0]?.data?.id === "IDX_CURRENT", JSON.stringify(out[0]))
 
   // 3) 引用收到过的消息 → 用 msg_idx
-  adapter.msgIdxById.set("ROBOT1.0_old", "IDX_OLD")
-  assert("引用历史消息用 msg_idx", adapter.toGroupReferenceId("ROBOT1.0_old", {}) === "IDX_OLD")
+  adapter.recordRef("10001", "IDX_OLD", "ROBOT1.0_old")
+  assert(
+    "引用历史消息用 msg_idx",
+    adapter.toGroupReferenceId("ROBOT1.0_old", { self_id: "10001" }) === "IDX_OLD",
+  )
 
   // 3.5) markdown 模式显式引用：保留 reply 元素并转成 msg_idx
   const dataQ = {
@@ -616,13 +623,11 @@ console.log("\n=== M. 群引用发送 / 引用索引 ===")
   assert("普通回复不产生引用气泡", !msgs2.flat().some(i => i.type === "reply"), JSON.stringify(msgs2.flat()))
 
   // 4) 引用机器人自己发的消息 → 用发送响应里的 ref_idx，并能反向解析回真实 ID
-  adapter.sentRefs.set("ROBOT1.0_sent", "REFIDX_sent")
-  adapter.refIdxMap.set("REFIDX_sent", {
-    message_id: "ROBOT1.0_sent",
-    sent: true,
-    expire: Date.now() + 60000,
-  })
-  assert("引用自己的消息用 ref_idx", adapter.toGroupReferenceId("ROBOT1.0_sent", {}) === "REFIDX_sent")
+  adapter.recordRef("10001", "REFIDX_sent", "ROBOT1.0_sent", true)
+  assert(
+    "引用自己的消息用 ref_idx",
+    adapter.toGroupReferenceId("ROBOT1.0_sent", { self_id: "10001" }) === "REFIDX_sent",
+  )
 
   const bot = Bot["10001"]
   bot.sdk.dispatchEvent("GROUP_AT_MESSAGE_CREATE", {
@@ -770,6 +775,49 @@ console.log("\n=== P. 频道 legacy multipart ===")
   bot.sdk.sendGuildMessage = oldSendGuild
 }
 
+console.log("\n=== Q. 引用索引持久化（24h / 7d） ===")
+{
+  const id = "10001"
+  const recvIdx = "REFIDX_RECV_TEST"
+  const sentIdx = "REFIDX_SENT_TEST"
+  adapter.recordRef(id, recvIdx, "ROBOT1.0_recv")
+  adapter.recordRef(id, sentIdx, "ROBOT1.0_sent", true)
+  await adapter.refWrite[id]
+  const file = adapter.refFilePath(id)
+  const lines = (await fs.readFile(file, "utf8")).trim().split("\n").filter(Boolean)
+  assert("引用索引写入文件", lines.length >= 2, String(lines.length))
+  assert("可反查引用索引", adapter.refOf(id, "ROBOT1.0_recv") === recvIdx)
+
+  // 模拟重启：销毁内存后从文件恢复
+  adapter.destroyRefStore(id)
+  await adapter.initRefStore(id)
+  assert("重启后解析收到消息", adapter.lookupRef(id, recvIdx)?.m === "ROBOT1.0_recv")
+  assert("重启后解析自己消息", adapter.lookupRef(id, sentIdx)?.m === "ROBOT1.0_sent")
+  assert("重启后反向索引可用", adapter.refOf(id, "ROBOT1.0_sent") === sentIdx)
+
+  const store = adapter.refStore[id]
+  const now = Date.now()
+  store.get(recvIdx).t = now - 25 * 60 * 60 * 1000
+  store.get(sentIdx).t = now - 25 * 60 * 60 * 1000
+  await adapter.cleanupRefStore(id)
+  assert("收到消息 24 小时过期", adapter.lookupRef(id, recvIdx) === null)
+  assert("自己发的消息 7 天内保留", adapter.lookupRef(id, sentIdx) !== null)
+
+  store.get(sentIdx).t = now - 8 * 24 * 60 * 60 * 1000
+  await adapter.cleanupRefStore(id)
+  // 生产环境由「启动时 / 每小时」触发压缩；测试里手动触发一次
+  await adapter.compactRefStore(id)
+  await adapter.refWrite[id]
+  assert("自己发的消息 7 天过期", adapter.lookupRef(id, sentIdx) === null)
+  console.log("DEBUG keys", [...store.keys()], "file:", (await fs.readFile(file, "utf8")).slice(0,200))
+  const after = await fs.readFile(file, "utf8")
+  assert(
+    "过期后文件已压缩",
+    !after.includes(recvIdx) && !after.includes(sentIdx),
+    after.slice(0, 160),
+  )
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
@@ -785,4 +833,6 @@ console.log("\n=== I. 冲突保护 / 退出 ===")
 }
 
 console.log(`\n结果：${pass} 通过，${fail} 失败`)
+process.chdir(originalCwd)
+await fs.rm(testWorkDir, { recursive: true, force: true })
 process.exit(fail ? 1 : 0)
