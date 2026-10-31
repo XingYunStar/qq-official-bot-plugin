@@ -180,10 +180,6 @@ export class QQBotAdapterTest extends plugin {
         return e.reply(
           "引用消息只有引用索引、没有真实消息 ID，无法撤回。\n可以直接发送 #qqbot撤回 来撤回一条测试消息。",
         )
-      if (message_id && e.group?.isOwnMessage?.(message_id) === undefined && e.group?.getMsg?.(message_id))
-        return e.reply(
-          "被引用的消息不是机器人发的，QQ 官方接口只允许撤回机器人自己发送的消息。\n（机器人发出的消息会记录 2 小时）",
-        )
       if (!message_id) {
         const ret = await e.reply("【撤回测试】这条消息马上会被撤回")
         message_id = ret?.message_id?.[0] || ret?.data?.[0]?.id
@@ -194,7 +190,7 @@ export class QQBotAdapterTest extends plugin {
       const ret = await e.group.recallMsg(message_id)
       const ok = Array.isArray(ret) ? ret.every(Boolean) : ret !== false
       if (!ok)
-        return e.reply(`❌ 撤回失败：${message_id}\n可能不是机器人发送的消息，或已超过可撤回时间`)
+        return e.reply(`❌ 撤回失败：${message_id}\n消息可能已过期，或机器人没有撤回权限`)
       return e.reply(`✅ 已撤回${desc}：${message_id}`)
     } catch (err) {
       return e.reply(`❌ 撤回失败：${errText(err)}`)
