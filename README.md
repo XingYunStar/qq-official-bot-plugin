@@ -106,7 +106,7 @@ pnpm install
 #QQBotMD机器人QQ号:inline
 ```
 
->  raw / inline（MD 按钮消息 / MD 消息）模式下**需要一个公网可访问的地址**：
+> raw / inline（MD 按钮消息 / MD 消息）模式下的图片会优先通过**官方素材管理**上传，Markdown 里直接使用 `qqbot-media://` 引用，**不再需要公网地址**；如果素材接口不可用（如没有权限），才会回退到公网 URL，这时才需要下面的配置：
 
 1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址 **域名或 IP**（需放行 2536 端口，或反向代理到 TRSS 的内网地址），浏览器打开该地址，后台日志应出现访问请求。
 2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址 `http://<TRSS内网IP>:2536`；docker 容器 TRSS 的内网 IP 可用下面命令查看（把 `TRSS` 换成你的容器名）：
@@ -122,7 +122,7 @@ pnpm install
 `server.yaml` 示例（把域名/IP换成自己的）：
 
 ```yaml
-# 服务器地址（公网可访问；MD 消息中的图片必须，legacy 频道图片走 multipart 不需要）
+# 服务器地址（素材上传失败时的回退地址；legacy 频道图片走 multipart 不需要）
 url: http://bot.example.com
 # 服务器端口
 port: 2536
@@ -157,12 +157,14 @@ https:
 | --- | --- |
 | **群内全量消息** | 支持 `GROUP_MESSAGE_CREATE`（开启「接收所有消息」后普通群消息也会派发）；按 `msg_id` 去重，只有真的 @机器人 才补自身 `at` |
 | **群引用（收）** | QQ 群引用不在 `message_reference`，而在 `msg_elements`（`message_type=103`）+ `message_scene.ext`；插件会自动补 `reply` 元素、还原真实消息 ID，`e.getReply()` 可读取被引用内容 |
-| **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；`msg_id` 仍是本条消息 ID，不影响被动回复 |
+| **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；被动回复的 `msg_id` 由消息池决定 |
+| **被动回复池** | 官方限制同一条群消息最多回复 5 条：插件会记录收到的群消息 ID（有效期 110 秒），发送时优先用最旧、未满 5 次的那个，避免一条消息被回复满后无法继续回复；没有有效消息时走主动消息 |
+| **MD 图片素材** | 通过官方素材管理上传图片，Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传失败自动回退到 `server.yaml` 的 `url` |
 | **群管理** | `e.group.muteMember()` 禁言、`e.group.kickMember()` 踢人、`e.group.getInfo()` 群信息、`e.group.getMemberInfo()` 成员信息；`e.member.is_admin / is_owner` |
 | **群通知** | 成员进群/退群 → `notice.group.increase/decrease`；入群申请 → `notice.group.join_request`；机器人被拉群 → `notice.group.bot.increase` |
 | **成员身份 / 昵称** | 优先使用消息事件 `author` / `mentions` 自带的 `member_role`、`username`，不依赖需要申请权限的「群成员详情」接口（接口报 `11253` 时自动回退） |
 | **入群审批** | 通过 `qq-official-bot` 的入群申请接口查询、同意、拒绝 |
-| **频道图片** | legacy（普通消息）模式支持 **multipart `file_image`** 直传，不依赖公网 URL；MD 模式仍转公网 URL |
+| **频道图片** | legacy（普通消息）模式支持 **multipart `file_image`** 直传，不依赖公网 URL；MD 模式优先素材上传，失败再转公网 URL |
 | **URL 处理** | `toQRCode: true` 转二维码（旧行为）、`"link"` 转 Markdown 链接 `[host](url)`、`false` 原样发送 |
 | **稳定性** | 断线退避重连、心跳超时探测、access_token 失败无限重试、重复连接清理、与旧插件冲突时自动跳过连接 |
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
@@ -201,9 +203,17 @@ markdown:
 | `toQRCode` | URL 处理方式：`true` 二维码、`"link"` Markdown 链接、`false` 原样 |
 | `markdown` | `机器人QQ号: raw / inline / legacy / 模板ID` |
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
+| `toBotUpload` | 是否把 Markdown 图片上传到官方素材（`qqbot-media://`），默认 `true` |
 | `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
 | `reconnect` | 重连/心跳参数，同旧版 |
-| 其余 | `toCallback` / `toBotUpload` / `hideGuildRecall` / `imageLength` / `permission` 同旧版 |
+| 其余 | `toCallback` / `hideGuildRecall` / `imageLength` / `permission` 同旧版 |
+
+### 数据文件
+
+- `data/QQBot/<机器人QQ号>/refmap.ndjson`：`REFIDX` → 真实消息 ID 的引用索引
+  - 收到的消息保留 **24 小时**，机器人自己发的消息保留 **7 天**
+  - 每次启动时清理过期记录并原子重写；运行中每 10 分钟清理内存，按需压缩文件
+  - 这样即使 TRSS 每天只运行 1 分钟，也能在启动时完成清理
 
 ## 测试插件（example/qqbot-test.js）
 
@@ -248,14 +258,18 @@ master:
 - 鉴权：只需 AppID + AppSecret；旧 Token 字段保留但不再使用
 - Intents：`GROUP_AT_MESSAGE_CREATE` + `C2C_MESSAGE_CREATE` 合并为 `GROUP_AND_C2C_EVENT`
 - Webhook：仍是 `/QQBot` 单路由，签名改用 Ed25519
-- 频道/频道私信图片：legacy（普通消息）模式走 multipart `file_image` 上传，不需要公网 URL；MD 模式会先转公网 URL（需要 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 可被 QQ 访问）
+- 频道/频道私信图片：legacy（普通消息）模式走 multipart `file_image` 上传，不需要公网 URL；MD 模式优先走官方素材上传（`qqbot-media://`），失败才回退公网 URL
+- 被动回复：不再固定回复触发消息，而是用 110 秒内最旧的群消息 ID，单条消息最多回复 5 次
+- 引用索引：`REFIDX → 真实消息 ID` 持久化到 `data/QQBot/<机器人QQ号>/refmap.ndjson`，重启后仍可解析
 - 消息元素：插件内部仍是扁平结构，收发边界自动转换，对上层透明
 
 ## 已知限制
 
 - 「群成员详情」接口需要开放平台权限，未申请时返回 `11253`；身份/昵称会回退到消息事件字段
-- QQ 官方接口只能撤回**机器人自己发送的消息**；引用别人消息时只能读内容，不能撤回
-- 引用机器人自己的旧消息时，若平台只给 `REFIDX` 索引且本进程没有记录 `ref_idx`，则无法还原真实消息 ID（重启后旧记录丢失）
+- 撤回别人的消息需要机器人有相应权限（如群管理员），是否成功以平台返回为准
+- 改动前没有记录过的旧消息，平台只给 `REFIDX` 索引，无法还原真实消息 ID；新消息会持久化（收 24h / 发 7 天）
+- 同一条群消息最多回复 5 条；插件会用 110 秒内的其它消息 ID 续接，长时间没有新消息时只能走主动消息（受主动消息配额限制）
+- 素材上传需要开放平台相应接口权限，失败时会自动回退公网 URL
 - 群内全量消息需要在群设置中由群主开启「接收所有消息」
 
 ## 测试
@@ -264,7 +278,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（101 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（116 条断言）。
 
 ## 致谢
 
