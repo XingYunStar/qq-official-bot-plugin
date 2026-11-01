@@ -1072,6 +1072,40 @@ console.log("\n=== V. 素材记录持久化/按天按周清理 ===")
   Bot.uin.pop()
 }
 
+console.log("\n=== W. 连接时按时间戳清理 ===")
+{
+  const id = "10001"
+  const bot = Bot[id]
+  const deleted = []
+  const oldDel = bot.sdk.deleteMaterialImage
+  bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
+
+  clearInterval(adapter.materialTimer[id])
+  delete adapter.materialTimer[id]
+  adapter.materials[id] = new Map([
+    ["stale", { t: Date.now(), url: "u", md5: "m", uses: 1, expire: Date.now() + 100000 }],
+  ])
+  adapter.materialMd5[id] = new Map([["m", "stale"]])
+  adapter.materialMeta[id] = {
+    lastDaily: Date.now() - 25 * 60 * 60 * 1000,
+    lastWeekly: Date.now(),
+  }
+  adapter.materialReady[id] = false
+  await adapter.saveMaterialFile(id)
+
+  adapter.materials[id] = new Map()
+  adapter.materialMd5[id] = new Map()
+  await adapter.initMaterialManager(id)
+  const saved = JSON.parse(await fs.readFile(adapter.materialFilePath(id), "utf8"))
+  assert(
+    "连接时按时间戳清理并保存",
+    deleted.includes("stale") && saved.lastDaily > Date.now() - 60 * 1000,
+    JSON.stringify({ deleted, lastDaily: saved.lastDaily }),
+  )
+
+  bot.sdk.deleteMaterialImage = oldDel
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
