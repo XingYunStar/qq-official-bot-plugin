@@ -3,7 +3,7 @@
  *
  * 覆盖：撤回、禁言、踢人、群成员进群、入群申请列表、同意/拒绝进群、
  *       获取群成员身份/昵称/群名、e.at / e.atBot、引用回复、读取被引用消息、
- *       原始事件调试。
+ *       连发 10 条、原始事件调试。
  *
  * 只对 adapter_id === "QQBot"（qq-official-bot 适配器）生效，不影响 ICQQ 等其它适配器。
  * 注意：禁言/踢人/入群审批需要机器人在群内是管理员，部分接口还需开放平台申请权限。
@@ -111,6 +111,7 @@ export class QQBotAdapterTest extends plugin {
       event: "message",
       rule: [
         { reg: "^#qqbot测试$", fnc: "help" },
+        { reg: "^#qqbot(连发|发送10条)$", fnc: "burst" },
         { reg: "^#qqbot撤回$", fnc: "recall" },
         { reg: "^#qqbot禁言", fnc: "mute" },
         { reg: "^#qqbot踢人", fnc: "kick" },
@@ -151,6 +152,7 @@ export class QQBotAdapterTest extends plugin {
       [
         "QQBot 适配器测试命令：",
         "#qqbot撤回 —— 发送一条测试消息并撤回（引用消息时撤回被引用的那条）",
+        "#qqbot连发 —— 连续发送 10 条消息（测试被动回复消息池）",
         "#qqbot禁言 @某人 [秒数] —— 禁言，秒数 0 为解除，默认 600",
         "#qqbot踢人 @某人 [拉黑] —— 踢出群，带「拉黑」同时加入群黑名单",
         "#qqbot身份 [@某人] —— 查询群成员身份（群主/管理员/成员）",
@@ -169,6 +171,23 @@ export class QQBotAdapterTest extends plugin {
   }
 
   /** 撤回：优先撤回被引用的消息，否则发一条再撤回 */
+  /** 连续发送 10 条消息，用来验证被动回复消息池（每条消息最多回复 5 次） */
+  async burst() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    if (!(await this.checkAdmin(e))) return false
+    if (!e.group) return e.reply("该命令仅群聊可用")
+    try {
+      for (let i = 1; i <= 10; i++) {
+        const last = i === 10
+        await e.reply(`【连发测试】第 ${i}/10 条${last ? "（全部发送完成）" : ""}`)
+        if (!last) await sleep(600)
+      }
+    } catch (err) {
+      return e.reply(`❌ 连发测试失败：${errText(err)}`)
+    }
+  }
+
   async recall() {
     const e = this.e
     if (!isQQBot(e)) return false
