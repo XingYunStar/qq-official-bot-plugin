@@ -49,6 +49,10 @@ QQBotMessage.parse = (parse =>
     return parse.call(this, payload)
   })(QQBotMessage.parse)
 
+/** Markdown 素材：单机器人最多 100 张，上传后 1 分钟自动删除 */
+const MATERIAL_MAX = 100
+const MATERIAL_TTL = 60 * 1000
+
 /** 群被动回复：同一条消息最多回复 5 次，超过 110 秒就不能再作为被动回复 */
 const MSG_PASSIVE_TTL = 110 * 1000
 const MSG_PASSIVE_LIMIT = 5
@@ -154,6 +158,8 @@ const adapter = new (class QQBotAdapter {
     this.msgSeen = new Map()
     this.msgCache = new Map()
     this.msgPool = new Map()
+    this.materials = {}
+    this.materialTimer = {}
     this.refStore = {}
     this.refById = {}
     this.refFile = {}
@@ -316,14 +322,29 @@ const adapter = new (class QQBotAdapter {
     // 官方素材管理：上传后拿到 qqbot-media:// 引用，可直接写进 Markdown，不需要公网 URL
     if (Buffer.isBuffer(buffer))
       for (const i of Bot.uin) {
-        if (!Bot[i]?.sdk?.uploadMaterialImage) continue
-        try {
-          const meta = this.getImageMeta(buffer)
-          const image = await Bot[i].sdk.uploadMaterialImage(buffer, {
+        const sdk = Bot[i]?.sdk
+        if (!sdk?.uploadMaterialImage) continue
+        const meta = this.getImageMeta(buffer)
+        const upload = () =>
+          sdk.uploadMaterialImage(buffer, {
             fileName: meta.fileName,
             contentType: meta.contentType,
           })
-          if (image?.url) return image
+        try {
+          await this.ensureMaterialCapacity(i)
+          let image
+          try {
+            image = await upload()
+          } catch (err) {
+            if (!this.isMaterialLimitError(err)) throw err
+            Bot.makeLog("warn", ["素材图数量已满，清空后重试", err?.message || err], i)
+            await this.clearMaterialImages(i)
+            image = await upload()
+          }
+          if (image?.url) {
+            this.trackMaterial(i, image)
+            return image
+          }
         } catch (err) {
           Bot.makeLog("error", ["Markdown 图片素材上传失败", err], i)
         }
@@ -1382,6 +1403,89 @@ const adapter = new (class QQBotAdapter {
     item.used++
     if (item.used >= MSG_PASSIVE_LIMIT) list.shift()
     return item.id
+  }
+
+  /** 素材管理：启动每分钟清理一次 */
+  initMaterialManager(id) {
+    if (this.materialTimer[id]) return
+    this.materials[id] ||= new Map()
+    const timer = setInterval(
+      () => this.cleanupMaterials(id).catch(() => {}),
+      60 * 1000,
+    )
+    timer.unref?.()
+    this.materialTimer[id] = timer
+  }
+
+  isMaterialGone(err) {
+    const code = String(err?.code ?? err?.response?.data?.code ?? "")
+    return ["40035008", "40035009"].includes(code) || /不存在|已删除|已过期/.test(String(err?.message || ""))
+  }
+
+  isMaterialLimitError(err) {
+    const code = String(err?.code ?? err?.response?.data?.code ?? "")
+    return (
+      code === "40035007" ||
+      String(err?.message || "").includes("40035007") ||
+      /超过.*上限|数量.*上限/.test(String(err?.message || ""))
+    )
+  }
+
+  trackMaterial(id, image) {
+    if (!image?.image_id) return
+    const map = (this.materials[id] ||= new Map())
+    map.set(image.image_id, { t: Date.now(), url: image.url })
+  }
+
+  /** 删除当前机器人平台上的全部素材图（含非本进程上传的），用于数量满时立即清空 */
+  async clearMaterialImages(id) {
+    const sdk = Bot[id]?.sdk
+    if (!sdk) return
+    const ids = new Set(this.materials[id] ? [...this.materials[id].keys()] : [])
+    try {
+      const images = await sdk.getMaterialImages()
+      for (const image of images || []) if (image?.image_id) ids.add(image.image_id)
+    } catch (err) {
+      Bot.makeLog("warn", ["查询素材列表失败", err?.message || err], id)
+    }
+    let deleted = 0
+    for (const imageId of ids)
+      try {
+        await sdk.deleteMaterialImage(imageId)
+        this.materials[id]?.delete(imageId)
+        deleted++
+      } catch (err) {
+        if (this.isMaterialGone(err)) this.materials[id]?.delete(imageId)
+        else Bot.makeLog("warn", ["删除素材失败", imageId, err?.message || err], id)
+      }
+    if (deleted) Bot.makeLog("mark", `已清空 ${deleted} 张素材图`, id)
+  }
+
+  /** 达到 100 张就立即清空 */
+  async ensureMaterialCapacity(id) {
+    if ((this.materials[id]?.size || 0) >= MATERIAL_MAX) {
+      Bot.makeLog("warn", "素材图达到 100 张，立即清空", id)
+      await this.clearMaterialImages(id)
+    }
+  }
+
+  /** 每分钟删除 1 分钟前上传的素材图 */
+  async cleanupMaterials(id) {
+    const map = this.materials[id]
+    if (!map?.size) return
+    const now = Date.now()
+    const sdk = Bot[id]?.sdk
+    if (!sdk?.deleteMaterialImage) return
+    for (const [imageId, item] of [...map]) {
+      if (item.t + MATERIAL_TTL > now) continue
+      try {
+        await sdk.deleteMaterialImage(imageId)
+        map.delete(imageId)
+      } catch (err) {
+        if (this.isMaterialGone(err)) map.delete(imageId)
+        else Bot.makeLog("warn", ["删除过期素材失败", imageId, err?.message || err], id)
+      }
+    }
   }
 
   /**
@@ -2628,6 +2732,7 @@ const adapter = new (class QQBotAdapter {
     }
 
     await this.initRefStore(id)
+    this.initMaterialManager(id)
 
     Bot[id].sdk.logger = {}
     for (const i of ["trace", "debug", "info", "mark", "warn", "error", "fatal"])
