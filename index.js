@@ -49,6 +49,11 @@ QQBotMessage.parse = (parse =>
     return parse.call(this, payload)
   })(QQBotMessage.parse)
 
+/** 群被动回复：同一条消息最多回复 5 次，超过 110 秒就不能再作为被动回复 */
+const MSG_PASSIVE_TTL = 110 * 1000
+const MSG_PASSIVE_LIMIT = 5
+const MSG_POOL_MAX = 100
+
 /** 引用索引持久化：收到的消息 24 小时，机器人自己发的消息 7 天 */
 const REF_TTL_RECV = 24 * 60 * 60 * 1000
 const REF_TTL_SENT = 7 * 24 * 60 * 60 * 1000
@@ -148,6 +153,7 @@ const adapter = new (class QQBotAdapter {
     this.retryTask = {}
     this.msgSeen = new Map()
     this.msgCache = new Map()
+    this.msgPool = new Map()
     this.refStore = {}
     this.refById = {}
     this.refFile = {}
@@ -305,16 +311,56 @@ const adapter = new (class QQBotAdapter {
   }
 
   async makeBotImage(file) {
-    if (config.toBotUpload)
+    if (!config.toBotUpload) return
+    const buffer = Buffer.isBuffer(file) ? file : await Bot.Buffer(file).catch(() => null)
+    // 官方素材管理：上传后拿到 qqbot-media:// 引用，可直接写进 Markdown，不需要公网 URL
+    if (Buffer.isBuffer(buffer))
       for (const i of Bot.uin) {
-        if (!Bot[i].uploadImage) continue
+        if (!Bot[i]?.sdk?.uploadMaterialImage) continue
         try {
-          const image = await Bot[i].uploadImage(file)
-          if (image.url) return image
+          const meta = this.getImageMeta(buffer)
+          const image = await Bot[i].sdk.uploadMaterialImage(buffer, {
+            fileName: meta.fileName,
+            contentType: meta.contentType,
+          })
+          if (image?.url) return image
         } catch (err) {
-          Bot.makeLog("error", ["Bot", i, "图片上传错误", file, err])
+          Bot.makeLog("error", ["Markdown 图片素材上传失败", err], i)
         }
       }
+    // 兼容其他上传接口
+    for (const i of Bot.uin) {
+      if (!Bot[i].uploadImage) continue
+      try {
+        const image = await Bot[i].uploadImage(buffer || file)
+        if (image.url) return image
+      } catch (err) {
+        Bot.makeLog("error", ["Bot", i, "图片上传错误", file, err])
+      }
+    }
+  }
+
+  /** 根据文件头判断图片格式（素材上传要求扩展名与 contentType 一致） */
+  getImageMeta(buffer) {
+    if (
+      buffer.length > 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47
+    )
+      return { fileName: "image.png", contentType: "image/png" }
+    if (buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
+      return { fileName: "image.jpg", contentType: "image/jpeg" }
+    if (buffer.slice(0, 3).toString("latin1") === "GIF")
+      return { fileName: "image.gif", contentType: "image/gif" }
+    if (
+      buffer.length > 12 &&
+      buffer.slice(0, 4).toString("latin1") === "RIFF" &&
+      buffer.slice(8, 12).toString("latin1") === "WEBP"
+    )
+      return { fileName: "image.webp", contentType: "image/webp" }
+    return { fileName: "image.png", contentType: "image/png" }
   }
 
   async makeMarkdownImage(data, file, summary = "图片") {
@@ -529,7 +575,7 @@ const adapter = new (class QQBotAdapter {
         } else if (explicit && this.isGroupChat(data)) {
           // 群聊引用：保留 reply 元素，发送时转成 message_reference.message_id（msg_idx）
           for (const i of messages) i.unshift({ type: "reply", id: reply.id })
-        } else {
+        } else if (!source.id) {
           source.id = reply.id
         }
       }
@@ -694,7 +740,7 @@ const adapter = new (class QQBotAdapter {
             i.unshift({ type: "reply", event_id: reply.id.replace(/^event_/, "") })
         else if (explicit && this.isGroupChat(data))
           for (const i of messages) i.unshift({ type: "reply", id: reply.id })
-        else source.id = reply.id
+        else if (!source.id) source.id = reply.id
       }
     }
     return messages
@@ -824,7 +870,8 @@ const adapter = new (class QQBotAdapter {
               ? { type: "reply", event_id: reply.id.replace(/^event_/, "") }
               : reply,
           )
-      else if (Date.now() / 1000 - data.time < 300) source.id = data.message_id
+      else if (!source.id && Date.now() / 1000 - data.time < 300)
+        source.id = data.message_id
     }
     return messages
   }
@@ -832,8 +879,14 @@ const adapter = new (class QQBotAdapter {
   async sendMsg(data, send, msg) {
     const rets = { message_id: [], data: [], error: [] },
       source = {}
-    // 被动回复的消息 ID：用于 5 分钟内回复，且不能是事件 ID
-    if (data.message_id && !String(data.message_id).startsWith("event_"))
+    // 群聊被动回复：用 110 秒内最旧的消息 ID（每条最多回复 5 次），没有则走主动
+    const passiveId = this.pickMsgId(data)
+    if (passiveId) source.id = passiveId
+    else if (
+      !this.isGroupChat(data) &&
+      data.message_id &&
+      !String(data.message_id).startsWith("event_")
+    )
       source.id = String(data.message_id)
     let msgs
 
@@ -1290,6 +1343,48 @@ const adapter = new (class QQBotAdapter {
   }
 
   /**
+   * 记录群消息 ID，供被动回复使用。
+   * 官方限制：同一条群消息最多回复 5 条；这里只保留 110 秒内的消息，
+   * 发送时优先用最旧的，避免一条消息被回复次数打满后无法再回复。
+   */
+  recordMsgId(data) {
+    if (data?.message_type !== "group" || data.channel_id || data.guild_id) return
+    if (!data.message_id || String(data.message_id).startsWith("event_")) return
+    const gid = this.rawId(data.group_id || data.group_openid)
+    if (!gid) return
+    const key = `${data.self_id}:${gid}`
+    let list = this.msgPool.get(key)
+    if (!list) this.msgPool.set(key, (list = []))
+    if (list.some(i => i.id === data.message_id)) return
+    list.push({ id: data.message_id, t: Date.now(), used: 0 })
+    this.pruneMsgPool(list)
+    if (list.length > MSG_POOL_MAX) list.splice(0, list.length - MSG_POOL_MAX)
+  }
+
+  pruneMsgPool(list) {
+    const now = Date.now()
+    while (
+      list.length &&
+      (list[0].t + MSG_PASSIVE_TTL <= now || list[0].used >= MSG_PASSIVE_LIMIT)
+    )
+      list.shift()
+  }
+
+  /** 取有效期内最旧、且回复次数未满的群消息 ID；没有则返回 null（走主动消息） */
+  pickMsgId(data) {
+    const gid = this.rawId(data?.group_id || data?.group_openid)
+    if (!gid || data.channel_id || data.guild_id) return null
+    const list = this.msgPool.get(`${data.self_id}:${gid}`)
+    if (!list) return null
+    this.pruneMsgPool(list)
+    const item = list[0]
+    if (!item) return null
+    item.used++
+    if (item.used >= MSG_PASSIVE_LIMIT) list.shift()
+    return item.id
+  }
+
+  /**
    * 引用索引持久化（data/QQBot/<机器人QQ号>/refmap.ndjson）
    * 记录 REFIDX(msg_idx/ref_idx) → 真实 message_id：
    * - 收到的消息保留 24 小时（用于引用、撤回）
@@ -1427,6 +1522,7 @@ const adapter = new (class QQBotAdapter {
     }
     if (data.group_id) this.msgCache.set(`g:${this.rawId(data.group_id)}:${data.message_id}`, entry)
     if (data.user_id) this.msgCache.set(`u:${this.rawId(data.user_id)}:${data.message_id}`, entry)
+    this.recordMsgId(data)
     const scene = this.parseMessageScene(data.raw)
     // 持久化 REFIDX(msg_idx) → 真实消息 ID（24 小时）
     if (scene.msg_idx) this.recordRef(data.self_id, scene.msg_idx, data.message_id)
