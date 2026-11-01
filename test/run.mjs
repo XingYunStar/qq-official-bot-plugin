@@ -863,6 +863,19 @@ console.log("\n=== S. Markdown 素材上传 ===")
   }
   const fallback = await adapter.makeMarkdownImage(data, png, "图片")
   assert("素材上传失败回退公网 URL", String(fallback.url).startsWith("(http"), fallback.url)
+  // noCompress：跳过压缩
+  const oldCompress = adapter.compressImage
+  let compressed = 0
+  adapter.compressImage = async (d, f) => {
+    compressed++
+    return f
+  }
+  await adapter.makeMarkdownImage(data, png, "图片", true)
+  assert("noCompress 跳过压缩", compressed === 0, String(compressed))
+  await adapter.makeMarkdownImage(data, png, "图片")
+  assert("默认仍然压缩", compressed === 1, String(compressed))
+  adapter.compressImage = oldCompress
+
   if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
   else delete bot.sdk.uploadMaterialImage
   Bot.uin.pop()

@@ -231,7 +231,7 @@ markdown:
 | `#qqbot引用消息` | 读取被引用消息内容（支持 `msg_elements` 引用） |
 | `#qqbot撤回` | 撤回测试消息；引用消息时撤回被引用那条 |
 | `#qqbot连发` | 连续发送 10 条消息（测试被动回复消息池） |
-| `#qqbot9MB` | 发送一张 9MB 测试图片（URL，素材上传/大图测试） |
+| `#qqbot9MB` | 发送一张 9MB 测试图片（URL，不压缩，素材上传/大图测试） |
 | `#qqbot禁言 @某人 [秒数]` | 禁言，`0` 为解除（需要机器人是群管理员） |
 | `#qqbot踢人 @某人 [拉黑]` | 踢人，可选加入群黑名单 |
 | `#qqbot进群申请` | 待审批入群申请列表 |
@@ -240,7 +240,7 @@ markdown:
 
 权限：群管理命令要求发送者是 TRSS master 或群主/管理员；测试插件顶部有 `SKIP_PERMISSION_CHECK` 开关（默认 `false`）。
 
-`#qqbot9MB` 使用公网图片 `https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg`（约 9MB）。
+`#qqbot9MB` 使用公网图片 `https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg`（约 9MB），并标记 `noCompress`，**不经过图片压缩**。
 
 ### master 单聊通知
 
@@ -282,7 +282,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（116 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（118 条断言）。
 
 ## 致谢
 
