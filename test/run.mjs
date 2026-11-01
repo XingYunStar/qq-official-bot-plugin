@@ -818,6 +818,56 @@ console.log("\n=== Q. 引用索引持久化（24h / 7d） ===")
   )
 }
 
+console.log("\n=== R. 群被动回复消息池 ===")
+{
+  adapter.msgPool.clear()
+  const data = { self_id: "10001", message_type: "group", group_id: "GROUP_POOL" }
+  adapter.recordMsgId({ ...data, message_id: "m1" })
+  adapter.recordMsgId({ ...data, message_id: "m2" })
+  const picks = []
+  for (let i = 0; i < 6; i++) picks.push(adapter.pickMsgId(data))
+  assert("优先使用最旧的消息 ID", picks.slice(0, 4).every(i => i === "m1"), JSON.stringify(picks))
+  assert("同一消息最多回复 5 次", picks[4] === "m1" && picks[5] === "m2", JSON.stringify(picks))
+
+  const list = adapter.msgPool.get("10001:GROUP_POOL")
+  list[0].t = Date.now() - 120 * 1000
+  assert("超过 110 秒走主动消息", adapter.pickMsgId(data) === null, JSON.stringify(list))
+  adapter.msgPool.clear()
+}
+
+console.log("\n=== S. Markdown 素材上传 ===")
+{
+  const bot = Bot["10001"]
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  )
+  const calls = []
+  const oldUpload = bot.sdk.uploadMaterialImage
+  Bot.uin.push("10001")
+  bot.sdk.uploadMaterialImage = async (buffer, opts) => {
+    calls.push({ size: buffer.length, ...opts })
+    return { url: "qqbot-media://img-1", image_id: "img-1", ttl: 100 }
+  }
+  const data = { self_id: "10001", bot }
+  const image = await adapter.makeMarkdownImage(data, png, "图片")
+  assert("Markdown 使用 qqbot-media", image.url.includes("qqbot-media://"), image.url)
+  assert(
+    "素材上传参数正确",
+    calls[0]?.fileName === "image.png" && calls[0]?.contentType === "image/png",
+    JSON.stringify(calls[0]),
+  )
+
+  bot.sdk.uploadMaterialImage = async () => {
+    throw new Error("no permission")
+  }
+  const fallback = await adapter.makeMarkdownImage(data, png, "图片")
+  assert("素材上传失败回退公网 URL", String(fallback.url).startsWith("(http"), fallback.url)
+  if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
+  else delete bot.sdk.uploadMaterialImage
+  Bot.uin.pop()
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
