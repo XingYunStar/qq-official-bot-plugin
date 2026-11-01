@@ -53,6 +53,10 @@ QQBotMessage.parse = (parse =>
 /** Markdown 素材：单机器人最多 100 张，上传后 1 分钟自动删除 */
 const MATERIAL_MAX = 100
 const MATERIAL_TTL = 60 * 1000
+const MATERIAL_KEEP = 20
+const MATERIAL_DAY = 24 * 60 * 60 * 1000
+const MATERIAL_WEEK = 7 * MATERIAL_DAY
+const MATERIAL_SAVE_DELAY = 5000
 
 /** 群被动回复：同一条消息最多回复 5 次，超过 110 秒就不能再作为被动回复 */
 const MSG_PASSIVE_TTL = 110 * 1000
@@ -161,7 +165,9 @@ const adapter = new (class QQBotAdapter {
     this.msgPool = new Map()
     this.materials = {}
     this.materialMd5 = {}
+    this.materialMeta = {}
     this.materialTimer = {}
+    this.materialSaveTimer = {}
     this.refStore = {}
     this.refById = {}
     this.refFile = {}
@@ -1411,11 +1417,133 @@ const adapter = new (class QQBotAdapter {
     return item.id
   }
 
-  /** 素材管理：启动每分钟清理一次 */
-  initMaterialManager(id) {
+  materialFilePath(id) {
+    return path.join(this.path, id, "materials.json")
+  }
+
+  /** 启动时加载素材复用记录（data/QQBot/<机器人QQ号>/materials.json） */
+  async loadMaterialFile(id) {
+    const file = this.materialFilePath(id)
+    let data
+    try {
+      data = JSON.parse(await fs.readFile(file, "utf8"))
+    } catch {}
+    const meta = (this.materialMeta[id] ||= { lastDaily: Date.now(), lastWeekly: Date.now() })
+    if (data) {
+      if (data.lastDaily) meta.lastDaily = data.lastDaily
+      if (data.lastWeekly) meta.lastWeekly = data.lastWeekly
+      const now = Date.now()
+      for (const r of data.images || []) {
+        if (!r?.i || !r?.m) continue
+        if (r.x && r.x < now) continue
+        this.materials[id] ||= new Map()
+        this.materials[id].set(r.i, {
+          t: r.t || now,
+          url: r.u,
+          md5: r.m,
+          uses: r.s || 1,
+          expire: r.x,
+        })
+        ;(this.materialMd5[id] ||= new Map()).set(r.m, r.i)
+      }
+    }
+  }
+
+  async saveMaterialFile(id) {
+    const meta = this.materialMeta[id] || {}
+    const images = []
+    for (const [imageId, item] of this.materials[id] || [])
+      images.push({
+        i: imageId,
+        u: item.url,
+        m: item.md5,
+        t: item.t,
+        s: item.uses || 0,
+        x: item.expire,
+      })
+    const file = this.materialFilePath(id)
+    try {
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      const tmp = `${file}.tmp`
+      await fs.writeFile(
+        tmp,
+        JSON.stringify({ lastDaily: meta.lastDaily, lastWeekly: meta.lastWeekly, images }),
+      )
+      await fs.rename(tmp, file)
+    } catch (err) {
+      Bot.makeLog("error", ["保存素材记录失败", err], id)
+    }
+  }
+
+  /** 记录变更后延迟写盘，避免频繁 IO */
+  scheduleMaterialSave(id) {
+    if (this.materialSaveTimer[id]) return
+    const timer = setTimeout(() => {
+      this.materialSaveTimer[id] = null
+      this.saveMaterialFile(id).catch(() => {})
+    }, MATERIAL_SAVE_DELAY)
+    timer.unref?.()
+    this.materialSaveTimer[id] = timer
+  }
+
+  /** 每天清理复用次数=1 的记录；每周只保留复用次数最高的 20 张 */
+  async cleanupMaterialRecords(id, kind) {
+    const map = this.materials[id]
+    if (!map?.size) return
+    const sdk = Bot[id]?.sdk
+    let remove
+    if (kind === "weekly") {
+      const keep = new Set(
+        [...map.entries()]
+          .sort((a, b) => (b[1].uses || 0) - (a[1].uses || 0))
+          .slice(0, MATERIAL_KEEP)
+          .map(([imageId]) => imageId),
+      )
+      remove = [...map.keys()].filter(imageId => !keep.has(imageId))
+    } else {
+      remove = [...map.entries()]
+        .filter(([, item]) => (item.uses || 0) <= 1)
+        .map(([imageId]) => imageId)
+    }
+    for (const imageId of remove) {
+      const item = map.get(imageId)
+      try {
+        await sdk?.deleteMaterialImage?.(imageId)
+      } catch (err) {
+        if (!this.isMaterialGone(err))
+          Bot.makeLog("warn", ["清理素材失败", imageId, err?.message || err], id)
+      }
+      map.delete(imageId)
+      if (item?.md5) this.materialMd5[id]?.delete(item.md5)
+    }
+    if (remove.length)
+      Bot.makeLog("mark", `素材记录清理（${kind === "weekly" ? "每周" : "每天"}）：删除 ${remove.length} 张`, id)
+  }
+
+  async checkMaterialRecords(id) {
+    const meta = this.materialMeta[id]
+    const map = this.materials[id]
+    if (!meta || !map) return
+    const now = Date.now()
+    if (now - (meta.lastDaily || 0) >= MATERIAL_DAY) {
+      await this.cleanupMaterialRecords(id, "daily")
+      meta.lastDaily = now
+      this.scheduleMaterialSave(id)
+    }
+    if (now - (meta.lastWeekly || 0) >= MATERIAL_WEEK) {
+      await this.cleanupMaterialRecords(id, "weekly")
+      meta.lastWeekly = now
+      this.scheduleMaterialSave(id)
+    }
+  }
+
+  /** 素材管理：启动时加载记录并检查按天/周清理，之后每分钟清理过期图 */
+  async initMaterialManager(id) {
     if (this.materialTimer[id]) return
     this.materials[id] ||= new Map()
     this.materialMd5[id] ||= new Map()
+    await this.loadMaterialFile(id)
+    await this.checkMaterialRecords(id)
     const timer = setInterval(
       () => this.cleanupMaterials(id).catch(() => {}),
       60 * 1000,
@@ -1445,6 +1573,7 @@ const adapter = new (class QQBotAdapter {
     if (image.ttl) item.expire = Date.now() + image.ttl * 1000
     map.set(image.image_id, item)
     if (md5) (this.materialMd5[id] ||= new Map()).set(md5, image.image_id)
+    this.scheduleMaterialSave(id)
   }
 
   /** 按 Buffer MD5 复用已上传的素材，复用次数 +1 */
@@ -1459,6 +1588,7 @@ const adapter = new (class QQBotAdapter {
       return null
     }
     item.uses = (item.uses || 0) + 1
+    this.scheduleMaterialSave(id)
     return { image_id: imageId, url: item.url, reused: true }
   }
 
@@ -1484,6 +1614,7 @@ const adapter = new (class QQBotAdapter {
         else Bot.makeLog("warn", ["删除素材失败", imageId, err?.message || err], id)
       }
     this.materialMd5[id]?.clear()
+    this.scheduleMaterialSave(id)
     if (deleted) Bot.makeLog("mark", `已清空 ${deleted} 张素材图`, id)
   }
 
@@ -1508,20 +1639,25 @@ const adapter = new (class QQBotAdapter {
         .slice(0, 20)
         .map(([imageId]) => imageId),
     )
+    let deleted = 0
     for (const [imageId, item] of [...map]) {
       if (keep.has(imageId)) continue
       if (item.t + MATERIAL_TTL > now) continue
       try {
         await sdk.deleteMaterialImage(imageId)
         map.delete(imageId)
+        deleted++
         if (item.md5) this.materialMd5[id]?.delete(item.md5)
       } catch (err) {
         if (this.isMaterialGone(err)) {
           map.delete(imageId)
+          deleted++
           if (item.md5) this.materialMd5[id]?.delete(item.md5)
         } else Bot.makeLog("warn", ["删除过期素材失败", imageId, err?.message || err], id)
       }
     }
+    if (deleted) this.scheduleMaterialSave(id)
+    await this.checkMaterialRecords(id)
   }
 
   /**
@@ -2768,7 +2904,6 @@ const adapter = new (class QQBotAdapter {
     }
 
     await this.initRefStore(id)
-    this.initMaterialManager(id)
 
     Bot[id].sdk.logger = {}
     for (const i of ["trace", "debug", "info", "mark", "warn", "error", "fatal"])
@@ -2796,6 +2931,7 @@ const adapter = new (class QQBotAdapter {
       }
 
       await Bot[id].login()
+      await this.initMaterialManager(id)
       Object.assign(Bot[id].info, await Bot[id].sdk.getSelfInfo())
     } catch (err) {
       Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)

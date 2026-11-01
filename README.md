@@ -159,7 +159,7 @@ https:
 | **群引用（收）** | QQ 群引用不在 `message_reference`，而在 `msg_elements`（`message_type=103`）+ `message_scene.ext`；插件会自动补 `reply` 元素、还原真实消息 ID，`e.getReply()` 可读取被引用内容 |
 | **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；被动回复的 `msg_id` 由消息池决定 |
 | **被动回复池** | 官方限制同一条群消息最多回复 5 条：插件会记录收到的群消息 ID（有效期 110 秒），发送时优先用最旧、未满 5 次的那个，避免一条消息被回复满后无法继续回复；没有有效消息时走主动消息 |
-| **MD 图片素材** | 通过官方素材管理上传图片，Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传后 **1 分钟自动删除**；按 Buffer MD5 复用，复用次数最高的 **20 张**不会被 1 分钟清理；素材达到 **100 张**或平台返回数量上限错误时立即清空全部素材并重试；上传失败自动回退到 `server.yaml` 的 `url` |
+| **MD 图片素材** | 通过官方素材管理上传图片，Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传后 **1 分钟自动删除**；按 Buffer MD5 复用（记录持久化），复用次数最高的 **20 张**不会被 1 分钟清理；每天清理复用次数=1 的记录、每周只保留复用次数最高的 20 张；素材达到 **100 张**或平台返回数量上限错误时立即清空全部素材并重试；上传失败自动回退到 `server.yaml` 的 `url` |
 | **群管理** | `e.group.muteMember()` 禁言、`e.group.kickMember()` 踢人、`e.group.getInfo()` 群信息、`e.group.getMemberInfo()` 成员信息；`e.member.is_admin / is_owner` |
 | **群通知** | 成员进群/退群 → `notice.group.increase/decrease`；入群申请 → `notice.group.join_request`；机器人被拉群 → `notice.group.bot.increase` |
 | **成员身份 / 昵称** | 优先使用消息事件 `author` / `mentions` 自带的 `member_role`、`username`，不依赖需要申请权限的「群成员详情」接口（接口报 `11253` 时自动回退） |
@@ -210,6 +210,9 @@ markdown:
 
 ### 数据文件
 
+- `data/QQBot/<机器人QQ号>/materials.json`：素材复用记录（MD5、复用次数、image_id）
+  - 上传/复用后延迟写盘，重启后仍可复用
+  - **每天**清理复用次数 = 1 的记录；**每周**只保留复用次数最高的 20 张
 - `data/QQBot/<机器人QQ号>/refmap.ndjson`：`REFIDX` → 真实消息 ID 的引用索引
   - 收到的消息保留 **24 小时**，机器人自己发的消息保留 **7 天**
   - 每次启动时清理过期记录并原子重写；运行中每 10 分钟清理内存，按需压缩文件
@@ -282,7 +285,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（125 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（128 条断言）。
 
 ## 致谢
 

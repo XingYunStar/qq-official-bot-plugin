@@ -1001,6 +1001,77 @@ console.log("\n=== U. 素材复用缓存 ===")
   Bot.uin.pop()
 }
 
+console.log("\n=== V. 素材记录持久化/按天按周清理 ===")
+{
+  const id = "10001"
+  const bot = Bot[id]
+  Bot.uin.push(id)
+  const oldDel = bot.sdk.deleteMaterialImage
+  const deleted = []
+  bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
+
+  adapter.materials[id] = new Map([
+    ["pimg", { t: Date.now(), url: "qqbot-media://p", md5: "pmd5", uses: 3, expire: Date.now() + 100000 }],
+    ["cold", { t: Date.now(), url: "qqbot-media://c", md5: "cmd5", uses: 1, expire: Date.now() + 100000 }],
+  ])
+  adapter.materialMd5[id] = new Map([
+    ["pmd5", "pimg"],
+    ["cmd5", "cold"],
+  ])
+  adapter.materialMeta[id] = { lastDaily: Date.now(), lastWeekly: Date.now() }
+  await adapter.saveMaterialFile(id)
+  adapter.materials[id] = new Map()
+  adapter.materialMd5[id] = new Map()
+  adapter.materialMeta[id] = {}
+  await adapter.loadMaterialFile(id)
+  assert(
+    "素材记录持久化",
+    adapter.materialMd5[id].get("pmd5") === "pimg" &&
+      adapter.materials[id].get("pimg")?.uses === 3,
+    JSON.stringify([...adapter.materialMd5[id]]),
+  )
+
+  adapter.materialMeta[id] = {
+    lastDaily: Date.now() - 25 * 60 * 60 * 1000,
+    lastWeekly: Date.now(),
+  }
+  deleted.length = 0
+  await adapter.checkMaterialRecords(id)
+  assert(
+    "每天清理复用次数=1",
+    !adapter.materials[id].has("cold") &&
+      adapter.materials[id].has("pimg") &&
+      deleted.includes("cold"),
+    JSON.stringify(deleted),
+  )
+
+  adapter.materials[id] = new Map()
+  adapter.materialMd5[id] = new Map()
+  for (let i = 0; i < 25; i++)
+    adapter.materials[id].set(`w${i}`, {
+      t: Date.now(),
+      url: `u${i}`,
+      md5: `m${i}`,
+      uses: i + 2,
+    })
+  adapter.materialMeta[id] = {
+    lastDaily: Date.now(),
+    lastWeekly: Date.now() - 8 * 24 * 60 * 60 * 1000,
+  }
+  deleted.length = 0
+  await adapter.checkMaterialRecords(id)
+  assert(
+    "每周只保留前 20 张",
+    adapter.materials[id].size === 20 &&
+      deleted.length === 5 &&
+      !deleted.includes("w24"),
+    JSON.stringify({ size: adapter.materials[id].size, deleted }),
+  )
+
+  bot.sdk.deleteMaterialImage = oldDel
+  Bot.uin.pop()
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
