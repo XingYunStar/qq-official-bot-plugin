@@ -858,6 +858,8 @@ console.log("\n=== S. Markdown 素材上传 ===")
     JSON.stringify(calls[0]),
   )
 
+  adapter.materials["10001"]?.clear()
+  adapter.materialMd5["10001"]?.clear()
   bot.sdk.uploadMaterialImage = async () => {
     throw new Error("no permission")
   }
@@ -893,14 +895,18 @@ console.log("\n=== T. 素材图生命周期 ===")
   bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
   bot.sdk.getMaterialImages = async () => [{ image_id: "old-platform" }]
 
-  adapter.materials[id] = new Map([
-    ["old-local", { t: Date.now() - 120 * 1000 }],
-    ["fresh-local", { t: Date.now() }],
-  ])
+  adapter.materials[id] = new Map()
+  for (let i = 0; i < 25; i++)
+    adapter.materials[id].set(`old-${i}`, {
+      t: Date.now() - 120 * 1000,
+      url: `u${i}`,
+      md5: `m${i}`,
+      uses: i,
+    })
   await adapter.cleanupMaterials(id)
   assert(
-    "清理 1 分钟前上传的素材",
-    deleted.includes("old-local") && adapter.materials[id].has("fresh-local"),
+    "清理 1 分钟前上传的素材（保留复用最高的 20 张）",
+    deleted.length === 5 && deleted.includes("old-0") && !deleted.includes("old-24"),
     JSON.stringify(deleted),
   )
   adapter.materials[id].clear()
@@ -939,6 +945,57 @@ console.log("\n=== T. 素材图生命周期 ===")
 
   bot.sdk.deleteMaterialImage = oldDel
   bot.sdk.getMaterialImages = oldGet
+  if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
+  else delete bot.sdk.uploadMaterialImage
+  Bot.uin.pop()
+}
+
+console.log("\n=== U. 素材复用缓存 ===")
+{
+  const id = "10001"
+  const bot = Bot[id]
+  Bot.uin.push(id)
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  )
+  const oldUpload = bot.sdk.uploadMaterialImage
+  const oldDel = bot.sdk.deleteMaterialImage
+  adapter.materials[id] = new Map()
+  adapter.materialMd5[id] = new Map()
+  let uploads = 0
+  bot.sdk.uploadMaterialImage = async () => {
+    uploads++
+    return { image_id: "imgA", url: "qqbot-media://a", ttl: 100 }
+  }
+  const a = await adapter.makeBotImage(png)
+  const b = await adapter.makeBotImage(png)
+  assert("相同图片复用素材", uploads === 1 && a.url === b.url, JSON.stringify({ uploads, a, b }))
+  assert(
+    "复用次数累加",
+    adapter.materials[id].get("imgA").uses === 2,
+    String(adapter.materials[id].get("imgA")?.uses),
+  )
+
+  adapter.materials[id] = new Map()
+  adapter.materialMd5[id] = new Map()
+  for (let i = 0; i < 25; i++)
+    adapter.materials[id].set(`img${i}`, {
+      t: Date.now() - 120 * 1000,
+      url: `u${i}`,
+      md5: `m${i}`,
+      uses: i,
+    })
+  const deleted = []
+  bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
+  await adapter.cleanupMaterials(id)
+  assert(
+    "复用最高的 20 张保留",
+    deleted.length === 5 && !deleted.includes("img24") && deleted.includes("img0"),
+    JSON.stringify(deleted),
+  )
+
+  bot.sdk.deleteMaterialImage = oldDel
   if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
   else delete bot.sdk.uploadMaterialImage
   Bot.uin.pop()

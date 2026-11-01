@@ -2,6 +2,7 @@ logger.info(logger.yellow("- 正在加载 QQBot 适配器插件（qq-official-bo
 
 import makeConfig from "../../lib/plugins/config.js"
 import cfg from "../../lib/config/config.js"
+import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -159,6 +160,7 @@ const adapter = new (class QQBotAdapter {
     this.msgCache = new Map()
     this.msgPool = new Map()
     this.materials = {}
+    this.materialMd5 = {}
     this.materialTimer = {}
     this.refStore = {}
     this.refById = {}
@@ -320,10 +322,13 @@ const adapter = new (class QQBotAdapter {
     if (!config.toBotUpload) return
     const buffer = Buffer.isBuffer(file) ? file : await Bot.Buffer(file).catch(() => null)
     // 官方素材管理：上传后拿到 qqbot-media:// 引用，可直接写进 Markdown，不需要公网 URL
-    if (Buffer.isBuffer(buffer))
+    if (Buffer.isBuffer(buffer)) {
+      const md5 = crypto.createHash("md5").update(buffer).digest("hex")
       for (const i of Bot.uin) {
         const sdk = Bot[i]?.sdk
         if (!sdk?.uploadMaterialImage) continue
+        const cached = this.getMaterial(i, md5)
+        if (cached?.url) return cached
         const meta = this.getImageMeta(buffer)
         const upload = () =>
           sdk.uploadMaterialImage(buffer, {
@@ -342,13 +347,14 @@ const adapter = new (class QQBotAdapter {
             image = await upload()
           }
           if (image?.url) {
-            this.trackMaterial(i, image)
+            this.trackMaterial(i, image, md5)
             return image
           }
         } catch (err) {
           Bot.makeLog("error", ["Markdown 图片素材上传失败", err], i)
         }
       }
+    }
     // 兼容其他上传接口
     for (const i of Bot.uin) {
       if (!Bot[i].uploadImage) continue
@@ -1409,6 +1415,7 @@ const adapter = new (class QQBotAdapter {
   initMaterialManager(id) {
     if (this.materialTimer[id]) return
     this.materials[id] ||= new Map()
+    this.materialMd5[id] ||= new Map()
     const timer = setInterval(
       () => this.cleanupMaterials(id).catch(() => {}),
       60 * 1000,
@@ -1431,10 +1438,28 @@ const adapter = new (class QQBotAdapter {
     )
   }
 
-  trackMaterial(id, image) {
+  trackMaterial(id, image, md5) {
     if (!image?.image_id) return
     const map = (this.materials[id] ||= new Map())
-    map.set(image.image_id, { t: Date.now(), url: image.url })
+    const item = { t: Date.now(), url: image.url, md5, uses: 1 }
+    if (image.ttl) item.expire = Date.now() + image.ttl * 1000
+    map.set(image.image_id, item)
+    if (md5) (this.materialMd5[id] ||= new Map()).set(md5, image.image_id)
+  }
+
+  /** 按 Buffer MD5 复用已上传的素材，复用次数 +1 */
+  getMaterial(id, md5) {
+    const index = this.materialMd5[id]
+    const imageId = index?.get(md5)
+    if (!imageId) return null
+    const item = this.materials[id]?.get(imageId)
+    if (!item || (item.expire && item.expire < Date.now())) {
+      index.delete(md5)
+      this.materials[id]?.delete(imageId)
+      return null
+    }
+    item.uses = (item.uses || 0) + 1
+    return { image_id: imageId, url: item.url, reused: true }
   }
 
   /** 删除当前机器人平台上的全部素材图（含非本进程上传的），用于数量满时立即清空 */
@@ -1458,6 +1483,7 @@ const adapter = new (class QQBotAdapter {
         if (this.isMaterialGone(err)) this.materials[id]?.delete(imageId)
         else Bot.makeLog("warn", ["删除素材失败", imageId, err?.message || err], id)
       }
+    this.materialMd5[id]?.clear()
     if (deleted) Bot.makeLog("mark", `已清空 ${deleted} 张素材图`, id)
   }
 
@@ -1469,21 +1495,31 @@ const adapter = new (class QQBotAdapter {
     }
   }
 
-  /** 每分钟删除 1 分钟前上传的素材图 */
+  /** 每分钟删除 1 分钟前上传的素材图；复用次数最高的 20 张保留 */
   async cleanupMaterials(id) {
     const map = this.materials[id]
     if (!map?.size) return
     const now = Date.now()
     const sdk = Bot[id]?.sdk
     if (!sdk?.deleteMaterialImage) return
+    const keep = new Set(
+      [...map.entries()]
+        .sort((a, b) => (b[1].uses || 0) - (a[1].uses || 0))
+        .slice(0, 20)
+        .map(([imageId]) => imageId),
+    )
     for (const [imageId, item] of [...map]) {
+      if (keep.has(imageId)) continue
       if (item.t + MATERIAL_TTL > now) continue
       try {
         await sdk.deleteMaterialImage(imageId)
         map.delete(imageId)
+        if (item.md5) this.materialMd5[id]?.delete(item.md5)
       } catch (err) {
-        if (this.isMaterialGone(err)) map.delete(imageId)
-        else Bot.makeLog("warn", ["删除过期素材失败", imageId, err?.message || err], id)
+        if (this.isMaterialGone(err)) {
+          map.delete(imageId)
+          if (item.md5) this.materialMd5[id]?.delete(item.md5)
+        } else Bot.makeLog("warn", ["删除过期素材失败", imageId, err?.message || err], id)
       }
     }
   }
