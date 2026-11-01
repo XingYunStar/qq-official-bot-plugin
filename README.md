@@ -231,6 +231,7 @@ markdown:
 | `#qqbot引用消息` | 读取被引用消息内容（支持 `msg_elements` 引用） |
 | `#qqbot撤回` | 撤回测试消息；引用消息时撤回被引用那条 |
 | `#qqbot连发` | 连续发送 10 条消息（测试被动回复消息池） |
+| `#qqbot9MB` | 发送一张 9MB 测试图片（素材上传/大图测试） |
 | `#qqbot禁言 @某人 [秒数]` | 禁言，`0` 为解除（需要机器人是群管理员） |
 | `#qqbot踢人 @某人 [拉黑]` | 踢人，可选加入群黑名单 |
 | `#qqbot进群申请` | 待审批入群申请列表 |
@@ -238,6 +239,8 @@ markdown:
 | `#qqbot原始` | 调试：输出本条消息的原始事件字段（`auth_token` 打码） |
 
 权限：群管理命令要求发送者是 TRSS master 或群主/管理员；测试插件顶部有 `SKIP_PERMISSION_CHECK` 开关（默认 `false`）。
+
+`#qqbot9MB` 需要一张 9MB 测试图：放到 `TRSS-Yunzai/resources/qqbot-test-9mb.jpg`，或设置环境变量 `QQBOT_TEST_IMAGE` 指向图片路径。
 
 ### master 单聊通知
 
