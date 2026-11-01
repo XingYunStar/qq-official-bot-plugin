@@ -8,6 +8,8 @@
  * 只对 adapter_id === "QQBot"（qq-official-bot 适配器）生效，不影响 ICQQ 等其它适配器。
  * 注意：禁言/踢人/入群审批需要机器人在群内是管理员，部分接口还需开放平台申请权限。
  */
+import fs from "node:fs/promises"
+
 const ADAPTER_ID = "QQBot"
 /** 测试期如需放开所有群管理权限，改成 true（默认按群主/管理员校验） */
 const SKIP_PERMISSION_CHECK = false
@@ -30,6 +32,21 @@ const atMembers = e =>
 const atIds = e => atMembers(e).map(i => rawId(i.qq))
 const roleText = role => ({ owner: "群主", admin: "管理员", member: "普通成员" })[role] || role || "未知"
 const errText = err => err?.message || err?.toString?.() || "未知错误"
+
+/** 9MB 测试图：优先环境变量，其次 TRSS 容器/宿主机的 resources */
+const BIG_IMAGE_CANDIDATES = [
+  process.env.QQBOT_TEST_IMAGE,
+  "/root/TRSS_AllBot/TRSS-Yunzai/resources/qqbot-test-9mb.jpg",
+  "/project/bot/TRSS-Yunzai/resources/qqbot-test-9mb.jpg",
+].filter(Boolean)
+
+async function readBigImage() {
+  for (const file of BIG_IMAGE_CANDIDATES)
+    try {
+      return { file, buffer: await fs.readFile(file) }
+    } catch {}
+  return null
+}
 
 const sdkOf = e => e.bot?.sdk
 const rawGroup = e => rawId(e.group_id)
@@ -112,6 +129,7 @@ export class QQBotAdapterTest extends plugin {
       rule: [
         { reg: "^#qqbot测试$", fnc: "help" },
         { reg: "^#qqbot(连发|发送10条)$", fnc: "burst" },
+        { reg: "^#qqbot(9[Mm][Bb]?|大图)$", fnc: "bigImage" },
         { reg: "^#qqbot撤回$", fnc: "recall" },
         { reg: "^#qqbot禁言", fnc: "mute" },
         { reg: "^#qqbot踢人", fnc: "kick" },
@@ -153,6 +171,7 @@ export class QQBotAdapterTest extends plugin {
         "QQBot 适配器测试命令：",
         "#qqbot撤回 —— 发送一条测试消息并撤回（引用消息时撤回被引用的那条）",
         "#qqbot连发 —— 连续发送 10 条消息（测试被动回复消息池）",
+        "#qqbot9MB —— 发送一张 9MB 测试图片（素材上传/大图测试）",
         "#qqbot禁言 @某人 [秒数] —— 禁言，秒数 0 为解除，默认 600",
         "#qqbot踢人 @某人 [拉黑] —— 踢出群，带「拉黑」同时加入群黑名单",
         "#qqbot身份 [@某人] —— 查询群成员身份（群主/管理员/成员）",
@@ -171,6 +190,21 @@ export class QQBotAdapterTest extends plugin {
   }
 
   /** 撤回：优先撤回被引用的消息，否则发一条再撤回 */
+  /** 发送一张 9MB 图片，测试素材上传/大图压缩 */
+  async bigImage() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    if (!(await this.checkAdmin(e))) return false
+    const image = await readBigImage()
+    if (!image)
+      return e.reply(
+        "找不到 9MB 测试图片：请放到 TRSS-Yunzai/resources/qqbot-test-9mb.jpg，或设置环境变量 QQBOT_TEST_IMAGE",
+      )
+    await e.reply(segment.image(image.buffer))
+    logger.mark(`[qqbot-test] 已发送 9MB 测试图片：${image.file}（${(image.buffer.length / 1024 / 1024).toFixed(2)} MB）`)
+    return true
+  }
+
   /** 连续发送 10 条消息，用来验证被动回复消息池（每条消息最多回复 5 次） */
   async burst() {
     const e = this.e
