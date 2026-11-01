@@ -881,6 +881,69 @@ console.log("\n=== S. Markdown 素材上传 ===")
   Bot.uin.pop()
 }
 
+console.log("\n=== T. 素材图生命周期 ===")
+{
+  const id = "10001"
+  const bot = Bot[id]
+  Bot.uin.push(id)
+  const deleted = []
+  const oldDel = bot.sdk.deleteMaterialImage
+  const oldGet = bot.sdk.getMaterialImages
+  const oldUpload = bot.sdk.uploadMaterialImage
+  bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
+  bot.sdk.getMaterialImages = async () => [{ image_id: "old-platform" }]
+
+  adapter.materials[id] = new Map([
+    ["old-local", { t: Date.now() - 120 * 1000 }],
+    ["fresh-local", { t: Date.now() }],
+  ])
+  await adapter.cleanupMaterials(id)
+  assert(
+    "清理 1 分钟前上传的素材",
+    deleted.includes("old-local") && adapter.materials[id].has("fresh-local"),
+    JSON.stringify(deleted),
+  )
+  adapter.materials[id].clear()
+  deleted.length = 0
+
+  for (let i = 0; i < 100; i++) adapter.materials[id].set(`local-${i}`, { t: Date.now() })
+  await adapter.ensureMaterialCapacity(id)
+  assert(
+    "满 100 张立即清空",
+    adapter.materials[id].size === 0 &&
+      deleted.includes("old-platform") &&
+      deleted.includes("local-0"),
+    String(deleted.length),
+  )
+
+  deleted.length = 0
+  let attempts = 0
+  bot.sdk.uploadMaterialImage = async () => {
+    attempts++
+    if (attempts === 1) {
+      const err = new Error("40035007 image limit")
+      err.code = 40035007
+      throw err
+    }
+    return { image_id: "new-img", url: "qqbot-media://new", ttl: 1 }
+  }
+  const image = await adapter.makeBotImage(
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]),
+  )
+  assert(
+    "数量上限清空后重试",
+    attempts === 2 && image?.url === "qqbot-media://new",
+    JSON.stringify({ attempts, image }),
+  )
+  assert("上传后记录素材", adapter.materials[id].get("new-img") != null)
+
+  bot.sdk.deleteMaterialImage = oldDel
+  bot.sdk.getMaterialImages = oldGet
+  if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
+  else delete bot.sdk.uploadMaterialImage
+  Bot.uin.pop()
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
