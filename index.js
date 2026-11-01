@@ -166,6 +166,7 @@ const adapter = new (class QQBotAdapter {
     this.materials = {}
     this.materialMd5 = {}
     this.materialMeta = {}
+    this.materialReady = {}
     this.materialTimer = {}
     this.materialSaveTimer = {}
     this.refStore = {}
@@ -1528,28 +1529,37 @@ const adapter = new (class QQBotAdapter {
     if (now - (meta.lastDaily || 0) >= MATERIAL_DAY) {
       await this.cleanupMaterialRecords(id, "daily")
       meta.lastDaily = now
-      this.scheduleMaterialSave(id)
+      // 时间戳立即落盘，避免只运行 1 分钟就退出时丢失
+      await this.saveMaterialFile(id)
     }
     if (now - (meta.lastWeekly || 0) >= MATERIAL_WEEK) {
       await this.cleanupMaterialRecords(id, "weekly")
       meta.lastWeekly = now
-      this.scheduleMaterialSave(id)
+      await this.saveMaterialFile(id)
     }
   }
 
-  /** 素材管理：启动时加载记录并检查按天/周清理，之后每分钟清理过期图 */
+  /**
+   * 素材管理：每次连接机器人都读取一次时间戳，判断是否达到按天/按周清理时间；
+   * 之后每分钟清理超过 1 分钟的素材图（保留复用前 20）。
+   */
   async initMaterialManager(id) {
-    if (this.materialTimer[id]) return
     this.materials[id] ||= new Map()
     this.materialMd5[id] ||= new Map()
-    await this.loadMaterialFile(id)
-    await this.checkMaterialRecords(id)
-    const timer = setInterval(
-      () => this.cleanupMaterials(id).catch(() => {}),
-      60 * 1000,
-    )
-    timer.unref?.()
-    this.materialTimer[id] = timer
+    if (!this.materialReady[id]) {
+      await this.loadMaterialFile(id)
+      this.materialReady[id] = true
+    }
+    // 连接时先清一次过期素材，并检查按天/按周清理（TRSS 只运行 1 分钟也能触发）
+    await this.cleanupMaterials(id)
+    if (!this.materialTimer[id]) {
+      const timer = setInterval(
+        () => this.cleanupMaterials(id).catch(() => {}),
+        60 * 1000,
+      )
+      timer.unref?.()
+      this.materialTimer[id] = timer
+    }
   }
 
   isMaterialGone(err) {
@@ -1629,10 +1639,12 @@ const adapter = new (class QQBotAdapter {
   /** 每分钟删除 1 分钟前上传的素材图；复用次数最高的 20 张保留 */
   async cleanupMaterials(id) {
     const map = this.materials[id]
-    if (!map?.size) return
     const now = Date.now()
     const sdk = Bot[id]?.sdk
-    if (!sdk?.deleteMaterialImage) return
+    if (!map?.size || !sdk?.deleteMaterialImage) {
+      await this.checkMaterialRecords(id)
+      return
+    }
     const keep = new Set(
       [...map.entries()]
         .sort((a, b) => (b[1].uses || 0) - (a[1].uses || 0))
