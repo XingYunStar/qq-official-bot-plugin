@@ -363,8 +363,8 @@ const adapter = new (class QQBotAdapter {
     return { fileName: "image.png", contentType: "image/png" }
   }
 
-  async makeMarkdownImage(data, file, summary = "图片") {
-    if (sharp) file = await this.compressImage(data, file)
+  async makeMarkdownImage(data, file, summary = "图片", noCompress = false) {
+    if (sharp && !noCompress) file = await this.compressImage(data, file)
     const buffer = await Bot.Buffer(file)
     const image = (await this.makeBotImage(buffer)) || { url: await Bot.fileToUrl(file) }
 
@@ -524,7 +524,7 @@ const adapter = new (class QQBotAdapter {
           content += await this.makeRawMarkdownText(data, i.text, keyboard && button)
           break
         case "image": {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
+          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i.noCompress)
           content += `${des}${url}`
           break
         }
@@ -694,7 +694,7 @@ const adapter = new (class QQBotAdapter {
           break
         }
         case "image": {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
+          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i.noCompress)
           template = this.makeMarkdownTemplatePush([[content, des]], template, templates)
           content = url
           break
@@ -805,7 +805,7 @@ const adapter = new (class QQBotAdapter {
             message = []
           }
 
-          if (sharp && i.file) i.file = await this.compressImage(data, i.file)
+          if (sharp && i.file && !i.noCompress) i.file = await this.compressImage(data, i.file)
           break
         case "file":
           if (i.file) i.file = await Bot.fileToUrl(i.file, i)
@@ -964,7 +964,7 @@ const adapter = new (class QQBotAdapter {
         case "embed":
           break
         case "image":
-          if (sharp && i.file) i.file = await this.compressImage(data, i.file)
+          if (sharp && i.file && !i.noCompress) i.file = await this.compressImage(data, i.file)
           // legacy（普通消息）模式：保留本地数据，发送时走 multipart 上传，不需要公网地址
           // 其它模式：频道图片只认公网 URL，先用 TRSS 转存
           if (config.markdown[data.self_id] !== "legacy" && !this.isHttpUrl(i.file))

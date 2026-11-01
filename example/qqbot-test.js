@@ -182,8 +182,11 @@ export class QQBotAdapterTest extends plugin {
     const e = this.e
     if (!isQQBot(e)) return false
     if (!(await this.checkAdmin(e))) return false
-    await e.reply(segment.image(BIG_IMAGE_URL))
-    logger.mark(`[qqbot-test] 已发送 9MB 测试图片：${BIG_IMAGE_URL}`)
+    const image = segment.image(BIG_IMAGE_URL)
+    // 大图测试：跳过适配器的压缩（默认会压到 imageLength，3MB）
+    image.noCompress = true
+    await e.reply(image)
+    logger.mark(`[qqbot-test] 已发送 9MB 测试图片（不压缩）：${BIG_IMAGE_URL}`)
     return true
   }
 
