@@ -1217,6 +1217,46 @@ console.log("\n=== I. 冲突保护 / 退出 ===")
   assert("logout 停止 token 刷新", !adapter.token["10001"])
 }
 
+console.log("\n=== AA. QQ 扫码登录流程（模拟上游） ===")
+{
+  const qqlogin = await import("../webui/qqlogin.js")
+  const oldFetch = globalThis.fetch
+  globalThis.fetch = async url => {
+    const u = String(url)
+    if (u.includes("ptqrshow"))
+      return new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47]), {
+        status: 200,
+        headers: [["set-cookie", "qrsig=abc; Path=/"]],
+      })
+    if (u.includes("ptqrlogin"))
+      return new Response(
+        "ptuiCB('0','0','https://q.qq.com/h5/ptlogin-callback.html?x=1','0','登录成功','nick')",
+        { status: 200 },
+      )
+    if (u.includes("ptlogin-callback"))
+      return new Response("ok", {
+        status: 200,
+        headers: [
+          ["set-cookie", "uin=o123; Domain=.qq.com; Path=/"],
+          ["set-cookie", "skey=xyz; Domain=.qq.com; Path=/"],
+        ],
+      })
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
+  }
+  try {
+    const qr = await qqlogin.startQrLogin()
+    assert("生成二维码", qr.image.startsWith("data:image/png;base64,"), qr.image.slice(0, 30))
+    const st = await qqlogin.pollQrLogin(qr.id)
+    assert(
+      "扫码成功并保存 Cookie",
+      st.status === "success" && st.cookie.includes("uin=o123") && st.cookie.includes("skey=xyz"),
+      JSON.stringify(st).slice(0, 200),
+    )
+  } finally {
+    globalThis.fetch = oldFetch
+  }
+}
+
 console.log(`\n结果：${pass} 通过，${fail} 失败`)
 process.chdir(originalCwd)
 await fs.rm(testWorkDir, { recursive: true, force: true })
