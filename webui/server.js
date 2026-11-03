@@ -9,6 +9,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import YAML from "yaml"
 import axios from "axios"
+import { startQrLogin, pollQrLogin } from "./qqlogin.js"
 
 const DATA_DIR = path.join("data", "QQBot")
 const AUTH_FILE = path.join(DATA_DIR, "webui.json")
@@ -330,6 +331,26 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       }
 
       // ---- qq login cookie / stats ----
+      if (pathname === "/api/qq/qr" && req.method === "POST") {
+        try {
+          return json(res, 200, await startQrLogin())
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/qq/qr/status") {
+        try {
+          const result = await pollQrLogin(url.searchParams.get("id"))
+          if (result.status === "success" && result.cookie) {
+            authData.qqCookie = result.cookie
+            authData.qqCookieAt = Date.now()
+            await saveAuth(authData)
+          }
+          return json(res, 200, result)
+        } catch (err) {
+          return json(res, 400, { error: String(err.message || err) })
+        }
+      }
       if (pathname === "/api/qq/status") {
         return json(res, 200, {
           loggedIn: !!authData.qqCookie,

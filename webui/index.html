@@ -128,7 +128,12 @@ td .bar{min-width:80px}
 
   <section id="tab-qq" class="hide">
     <h2>QQ 开放平台登录态</h2>
-    <p class="muted">WebUI 需要 q.qq.com 的 Cookie 才能读取运营数据。把浏览器里 q.qq.com 的 Cookie 粘贴到这里，保存后即可在「运营数据」查看。</p>
+    <p class="muted">支持扫码登录；也可以把浏览器里 q.qq.com 的 Cookie 粘贴到下面。登录后即可在「运营数据」查看。</p>
+    <div class="card" style="max-width:420px;text-align:center">
+      <div class="row" style="justify-content:center"><button id="qrStart">扫码登录</button><span class="muted" id="qrMsg">未开始</span></div>
+      <img id="qrImg" style="display:none;width:180px;height:180px;margin:12px auto 0" alt="QQ 登录二维码">
+    </div>
+    <h2>或粘贴 Cookie</h2>
     <div class="row"><span id="qqStatus" class="pill bad">未登录</span><span class="muted" id="qqAt"></span></div>
     <textarea id="qqCookie" style="min-height:120px;margin-top:12px" placeholder="uin=o...; skey=...; p_uin=...; pt4_token=..."></textarea>
     <div class="row" style="margin-top:10px"><button id="qqSave">保存 Cookie</button><button class="ghost" id="qqCheck">检测</button></div>
@@ -306,6 +311,32 @@ $("#qqSave").onclick = async () => {
   try { await api("/api/qq/cookie", { method: "POST", body: JSON.stringify({ cookie: $("#qqCookie").value }) }); toast("已保存"); loadQQ() } catch (e) { toast(e.message) }
 }
 $("#qqCheck").onclick = () => loadQQ()
+
+let qrTimer = null
+$("#qrStart").onclick = async () => {
+  try {
+    if (qrTimer) { clearInterval(qrTimer); qrTimer = null }
+    const data = await api("/api/qq/qr", { method: "POST", body: "{}" })
+    $("#qrImg").src = data.image
+    $("#qrImg").style.display = "block"
+    $("#qrMsg").textContent = "请用手机 QQ 扫码"
+    const started = Date.now()
+    qrTimer = setInterval(async () => {
+      if (Date.now() - started > 125000) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = "二维码已过期，请重新获取"; return }
+      try {
+        const s = await api("/api/qq/qr/status?id=" + encodeURIComponent(data.id))
+        $("#qrMsg").textContent = s.message || s.status
+        if (s.status === "success") {
+          clearInterval(qrTimer); qrTimer = null
+          $("#qrImg").style.display = "none"
+          toast("QQ 登录成功" + (s.nickname ? "：" + s.nickname : ""))
+          loadQQ()
+        }
+        if (s.status === "expired" || s.status === "error") { clearInterval(qrTimer); qrTimer = null }
+      } catch (e) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = e.message }
+    }, 2000)
+  } catch (e) { $("#qrMsg").textContent = e.message }
+}
 
 /* boot */
 ;(async () => {
