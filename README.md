@@ -2,7 +2,7 @@
 
 # qq-official-bot-plugin
 
-**[TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai) 的 QQBot 适配器插件**（基于 [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)）
+**[TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai) 的 QQ 官方机器人适配器插件**（基于 [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)）
 
 [QQ 群 1046894467](https://qm.qq.com/q/WdZoPbyPsI) · [流萤QQ官方机器人](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
 
@@ -62,7 +62,7 @@ pnpm install
 
 输入：
 
-#QQBot设置`机器人QQ号`:`AppID`:`Token`:`AppSecret`:`是否群Bot（是1/否0/WebHook 模式 2）`:`是否频道私域（是1 否0）`
+#QQBot设置`机器人QQ号`:`AppID`:`AppSecret`:`是否群Bot（是1/否0/WebHook 模式 2）`:`是否频道私域（是1 否0）`
 
 
 格式示例：
@@ -72,15 +72,16 @@ pnpm install
 - WebSocket 模式（推荐）
 
 ```
-#QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:1:0
+#QQBot设置3889012345:102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:1:0
 ```
 
 - WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
 
 ```
-#QQBot设置3889012345:102345678:AbCdEfGhIjKlMnOpQrStUvWxYz123432:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
+#QQBot设置3889012345:102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
 ```
 
+> 已不再需要 Token。旧版 `机器人QQ号:AppID:Token:AppSecret:...` 的配置仍然兼容，Token 会被自动忽略。
 
 ### 5. 发送图片 / MD 消息
 <details>
@@ -144,7 +145,7 @@ https:
 | 命令 | 说明 |
 | --- | --- |
 | `#QQBot账号` | 列出已配置账号 |
-| `#QQBot设置机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域` | 添加/删除账号（是 1 否 0） |
+| `#QQBot设置机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域` | 添加/删除账号（是 1 否 0） |
 | `#QQBot设置...:2` | 使用 Webhook 模式 |
 | `#QQBotMD机器人QQ号:raw/inline/legacy` | MD按钮消息 / MD消息 / 普通消息 |
 | `#QQBot图片限制2` | 图片大小限制（MB，默认 3） |
@@ -175,10 +176,11 @@ https:
 沿用旧版的 `TRSS-Yunzai/config/QQBot.yaml`，不需要重新配置账号。
 
 ```yaml
-# 机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
-# Webhook 模式用最后一段 2：机器人QQ号:AppID:Token:AppSecret:2
+# 机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域
+# Webhook 模式用最后一段 2：机器人QQ号:AppID:AppSecret:2
+# 旧版带 Token 的格式仍兼容：机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
 token:
-  - 114514:102000000:xxxxxxxx:xxxxxxxx:1:0
+  - 114514:102000000:xxxxxxxx:1:0
 
 bot:
   sandbox: false        # 已废弃，新平台统一域名，保留仅为兼容
@@ -198,7 +200,7 @@ markdown:
 
 | 配置项 | 说明 |
 | --- | --- |
-| `token` | 账号列表，格式同旧版 |
+| `token` | 账号列表：`机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域`；旧版含 Token 仍兼容 |
 | `bot` | 传给 SDK 的公共配置；`sandbox` 已废弃，`maxRetry` / `timeout` 仍生效 |
 | `toQRCode` | URL 处理方式：`true` 二维码、`"link"` Markdown 链接、`false` 原样 |
 | `markdown` | `机器人QQ号: raw / inline / legacy / 模板ID` |
@@ -254,7 +256,7 @@ master 来自 `TRSS-Yunzai/config/config/other.yaml` 的 `master` 配置（按�
 
 ```yaml
 master:
-  - "114514:你的openid"   # QQBot 需要使用 openid；也可以先在群里 #QQBot绑定用户
+  - "114514:你的openid"   # QQ 官方机器人需要使用 openid；也可以先在群里 #QQBot绑定用户
 ```
 
 找不到可用 master 时只会输出一条 warn 日志，不影响使用。
@@ -263,7 +265,7 @@ master:
 
 - SDK：`qq-group-bot` 1.1.0（停更）→ `qq-official-bot` 1.3.3（持续维护）
 - 域名：`api.sgroup.qq.com` → `api.bot.qq.com`（`sandbox` 已废弃）
-- 鉴权：只需 AppID + AppSecret；旧 Token 字段保留但不再使用
+- 配置：不再需要 Token，格式为 `机器人QQ号:AppID:AppSecret:...`；旧版含 Token 的配置仍可识别（Token 被忽略）
 - Intents：`GROUP_AT_MESSAGE_CREATE` + `C2C_MESSAGE_CREATE` 合并为 `GROUP_AND_C2C_EVENT`
 - Webhook：仍是 `/QQBot` 单路由，签名改用 Ed25519
 - 频道/频道私信图片：legacy（普通消息）模式走 multipart `file_image` 上传，不需要公网 URL；MD 模式优先走官方素材上传（`qqbot-media://`），失败才回退公网 URL
@@ -286,7 +288,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（130 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（136 条断言）。
 
 ## 致谢
 

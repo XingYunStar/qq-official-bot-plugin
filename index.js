@@ -69,6 +69,53 @@ const REF_TTL_SENT = 7 * 24 * 60 * 60 * 1000
 const REF_CLEAN_INTERVAL = 10 * 60 * 1000
 const REF_COMPACT_INTERVAL = 60 * 60 * 1000
 
+/**
+ * 解析账号配置，兼容新旧两种格式（Token 已不再使用）：
+ * 新：QQ号:AppID:AppSecret:是否群Bot:是否频道私域
+ *     QQ号:AppID:AppSecret:2（WebHook）
+ * 旧：QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
+ *     QQ号:AppID:Token:AppSecret:2（WebHook）
+ */
+export function parseTokenLine(line) {
+  const parts = String(line ?? "").trim().split(":")
+  if (parts.length < 4) return null
+  const [id, appid] = parts
+  if (!/^\d{5,}$/.test(id) || !/^[A-Za-z0-9_-]+$/.test(appid)) return null
+  if (parts.length === 4) {
+    if (parts[3] !== "2") return null
+    return { id, appid, secret: parts[2], webhook: true, group: "0", private: "0" }
+  }
+  if (parts.length === 5) {
+    if (parts[4] === "2")
+      return {
+        id,
+        appid,
+        token: parts[2],
+        secret: parts[3],
+        webhook: true,
+        group: "0",
+        private: "0",
+      }
+    return { id, appid, secret: parts[2], webhook: false, group: parts[3], private: parts[4] }
+  }
+  // 旧格式：第 3 段是 Token，读取时忽略
+  return {
+    id,
+    appid,
+    token: parts[2],
+    secret: parts[3],
+    webhook: false,
+    group: parts[4],
+    private: parts[5],
+  }
+}
+
+/** 输出新格式（不含 Token） */
+export function formatTokenLine(info) {
+  if (info.webhook) return `${info.id}:${info.appid}:${info.secret}:2`
+  return `${info.id}:${info.appid}:${info.secret}:${info.group}:${info.private}`
+}
+
 /** 断线重连 / 心跳超时探测默认配置 */
 const reconnectDefault = {
   /** 是否启用断线自动重连与心跳超时探测 */
@@ -2791,9 +2838,13 @@ const adapter = new (class QQBotAdapter {
         "error",
         "检测到已加载其他 QQBot 适配器（QQBot-Plugin），请只保留一个 QQBot 插件后再连接",
       )
-    token = token.split(":")
-    const id = token[0]
-    const webhook = token[4] === "2"
+    const info = parseTokenLine(token)
+    if (!info) {
+      Bot.makeLog("error", "账号配置格式错误：应为 机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域（或 :2 使用 WebHook）")
+      return false
+    }
+    const id = info.id
+    const webhook = info.webhook
 
     // 重复连接同一账号时先停掉旧实例，避免出现两条连接
     if (Bot[id]?.sdk) {
@@ -2808,9 +2859,8 @@ const adapter = new (class QQBotAdapter {
 
     const opts = {
       ...config.bot,
-      appid: token[1],
-      token: token[2],
-      secret: token[3],
+      appid: info.appid,
+      secret: info.secret,
       // qq-official-bot 必填：连接方式；Webhook 由插件自己挂到 TRSS 的 express 上
       mode: ReceiverMode.WEBSOCKET,
       // 新版默认会移除消息内容中的 @，这里保持旧版行为
@@ -2829,9 +2879,9 @@ const adapter = new (class QQBotAdapter {
       ],
     }
 
-    if (+token[4]) opts.intents.push("GROUP_AND_C2C_EVENT")
+    if (webhook || +info.group) opts.intents.push("GROUP_AND_C2C_EVENT")
 
-    if (+token[5]) opts.intents.push("GUILD_MESSAGES")
+    if (+info.private) opts.intents.push("GUILD_MESSAGES")
     else opts.intents.push("PUBLIC_GUILD_MESSAGES")
 
     Bot[id] = {
@@ -3128,7 +3178,7 @@ export class QQBotAdapter extends plugin {
           permission: config.permission,
         },
         {
-          reg: "^#[Qq]+[Bb]ot设置[0-9]+:[0-9]+:.+:.+:([01]:[01]|2)$",
+          reg: "^#[Qq]+[Bb]ot设置.+$",
           fnc: "Token",
           permission: config.permission,
         },
@@ -3156,23 +3206,50 @@ export class QQBotAdapter extends plugin {
   }
 
   List() {
-    this.reply(`共${config.token.length}个账号：\n${config.token.join("\n")}`, true)
+    const lines = config.token.map(item => {
+      const info = parseTokenLine(item)
+      return info ? formatTokenLine(info) : item
+    })
+    this.reply(`共${lines.length}个账号：\n${lines.join("\n")}`, true)
   }
 
   async Token() {
-    const token = this.e.msg.replace(/^#[Qq]+[Bb]ot设置/, "").trim()
-    if (config.token.includes(token)) {
-      config.token = config.token.filter(item => item !== token)
-      adapter.stopRetry(token.split(":")[0])
-      this.reply(`账号已删除，重启后生效，共${config.token.length}个账号`, true)
-    } else {
-      if (await adapter.connect(token)) {
-        config.token.push(token)
-        this.reply(`账号已连接，共${config.token.length}个账号`, true)
+    const input = this.e.msg.replace(/^#[Qq]+[Bb]ot设置/, "").trim()
+    const info = parseTokenLine(input)
+    if (!info)
+      return this.reply(
+        [
+          "格式错误，应为：",
+          "#QQBot设置机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域",
+          "#QQBot设置机器人QQ号:AppID:AppSecret:2（WebHook）",
+        ].join("\n"),
+        true,
+      )
+
+    const line = formatTokenLine(info)
+    const index = config.token.findIndex(item => parseTokenLine(item)?.id === info.id)
+    if (index >= 0) {
+      const existing = parseTokenLine(config.token[index])
+      if (existing && formatTokenLine(existing) === line) {
+        config.token.splice(index, 1)
+        adapter.stopRetry(info.id)
+        this.reply(`账号已删除，重启后生效，共${config.token.length}个账号`, true)
       } else {
-        this.reply(`账号连接失败`, true)
-        return false
+        config.token[index] = line
+        adapter.stopRetry(info.id)
+        if (await adapter.connect(line)) {
+          this.reply(`账号已更新，共${config.token.length}个账号`, true)
+        } else {
+          this.reply(`账号连接失败`, true)
+          return false
+        }
       }
+    } else if (await adapter.connect(line)) {
+      config.token.push(line)
+      this.reply(`账号已连接，共${config.token.length}个账号`, true)
+    } else {
+      this.reply(`账号连接失败`, true)
+      return false
     }
     return configSave()
   }

@@ -108,7 +108,7 @@ SdkBot.prototype.getSelfInfo = async function () {
 }
 
 nodeModule.register(new URL("./hooks.mjs", import.meta.url).href)
-await import("../index.js")
+const { parseTokenLine, formatTokenLine } = await import("../index.js")
 
 const adapter = Bot.adapter[0]
 let pass = 0,
@@ -1143,6 +1143,33 @@ console.log("\n=== X. 素材绑定发送机器人 ===")
   delete Bot["10002"]
   Bot.uin.length = 0
   Bot.uin.push(...oldUin)
+}
+
+console.log("\n=== Y. 账号配置新格式 ===")
+{
+  const oldLine = parseTokenLine("10001:123456:old-token:secret:1:0")
+  assert(
+    "兼容旧版含 Token",
+    oldLine?.appid === "123456" && oldLine?.secret === "secret" && oldLine?.webhook === false,
+    JSON.stringify(oldLine),
+  )
+  const newLine = parseTokenLine("10001:123456:secret:1:0")
+  assert(
+    "新版不含 Token",
+    newLine?.secret === "secret" && newLine?.group === "1" && newLine?.private === "0",
+    JSON.stringify(newLine),
+  )
+  assert("新版 WebHook", parseTokenLine("10001:123456:secret:2")?.webhook === true)
+  assert(
+    "旧版 WebHook",
+    parseTokenLine("10001:123456:old-token:secret:2")?.secret === "secret",
+  )
+  assert("格式错误返回 null", parseTokenLine("10001:123456") === null)
+  assert(
+    "格式化去掉 Token",
+    formatTokenLine(newLine) === "10001:123456:secret:1:0",
+    formatTokenLine(newLine),
+  )
 }
 
 console.log("\n=== I. 冲突保护 / 退出 ===")
