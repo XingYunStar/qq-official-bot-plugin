@@ -1172,6 +1172,37 @@ console.log("\n=== Y. 账号配置新格式 ===")
   )
 }
 
+console.log("\n=== Z. 图文卡片 ===")
+{
+  const card = {
+    type: "card",
+    content: {
+      title: "标题",
+      description: "描述",
+      url: "https://example.com",
+      pic_url: "https://example.com/a.png",
+    },
+  }
+  const sdk = adapter.normalizeCard(card)
+  assert(
+    "卡片规范化",
+    sdk?.data?.type === "tuwen" && sdk.data.content.url === "https://example.com",
+    JSON.stringify(sdk),
+  )
+  const parts = adapter.splitCardMessages(["文本", card, "结尾"])
+  assert(
+    "卡片单独成条",
+    parts.length === 3 && parts[1].length === 1 && parts[1][0].type === "card",
+    JSON.stringify(parts.map(p => p.length)),
+  )
+  const sent = adapter.toSdkMessage([card])
+  assert(
+    "toSdkMessage 输出 card",
+    sent[0].type === "card" && sent[0].data.content.title === "标题",
+    JSON.stringify(sent[0]),
+  )
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
