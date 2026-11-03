@@ -68,6 +68,7 @@ td .bar{min-width:80px}
   <button data-tab="materials">素材</button>
   <button data-tab="groups">群管理</button>
   <button data-tab="qq">QQ 登录</button>
+  <button data-tab="menu">菜单/面板</button>
 </nav>
 <main>
   <section id="tab-stats">
@@ -124,6 +125,19 @@ td .bar{min-width:80px}
       <button class="ghost" id="grpReload">刷新群列表</button>
     </div>
     <div style="overflow:auto;margin-top:12px"><table id="memTable"></table></div>
+    <h2>群黑名单</h2>
+    <div class="row"><input id="blInput" placeholder="member openid" style="min-width:260px"><button id="blAdd">加入黑名单</button><button class="ghost" id="blDel">移出黑名单</button><button class="ghost" id="blReload">刷新</button></div>
+    <div style="overflow:auto;margin-top:10px"><table id="blTable"></table></div>
+  </section>
+
+  <section id="tab-menu" class="hide">
+    <h2>自定义菜单（仅 C2C 生效）</h2>
+    <div class="row"><button class="ghost" id="menuLoad">读取</button><button id="menuSave">保存菜单</button><span class="muted" id="menuMsg"></span></div>
+    <textarea id="menuJson" spellcheck="false" style="min-height:220px" placeholder='{"menu": {...}}'></textarea>
+    <h2>指令面板</h2>
+    <div class="row"><button id="panelCreate">创建面板（JSON）</button><button class="ghost" id="panelReload">刷新列表</button><span class="muted" id="panelMsg"></span></div>
+    <textarea id="panelJson" spellcheck="false" style="min-height:120px" placeholder='{"channel": {...}, "dm": {...}}'></textarea>
+    <div style="overflow:auto;margin-top:10px"><table id="panelTable"></table></div>
   </section>
 
   <section id="tab-qq" class="hide">
@@ -182,6 +196,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "materials") loadMaterials()
   if (b.dataset.tab === "groups") loadGroups()
   if (b.dataset.tab === "qq") loadQQ()
+  if (b.dataset.tab === "menu") loadMenu()
 })
 $("#botSel").onchange = () => { state.bot = $("#botSel").value; if (state.tab==="stats") loadStats(state.range); if (state.tab==="materials") loadMaterials() }
 
@@ -294,6 +309,27 @@ async function loadMembers(group) {
       try { await api("/api/group/action", { method: "POST", body: JSON.stringify({ bot: state.bot, group, action, member, seconds: 600 }) }); toast("操作成功") } catch (e) { toast(e.message) }
     })
   } catch (e) { $("#memTable").innerHTML = `<tr><td style="color:#dc2626">${esc(e.message)}</td></tr>` }
+  loadBlacklist(group)
+}
+async function loadBlacklist(group) {
+  try {
+    const data = await api("/api/group/blacklist?" + new URLSearchParams({ bot: state.bot, group }))
+    const users = data.users || []
+    $("#blTable").innerHTML = "<tr><th>openid</th><th>昵称</th><th>操作</th></tr>" +
+      (users.map(u => `<tr><td>${esc(u.member_openid || u.openid)}</td><td>${esc(u.username || u.nickname || "")}</td><td><button class="danger" data-bl="${esc(u.member_openid || u.openid)}">移出</button></td></tr>`).join("") || "<tr><td colspan=3 class='muted'>暂无黑名单</td></tr>")
+    $("#blTable").querySelectorAll("[data-bl]").forEach(b => b.onclick = async () => {
+      try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group, op: "del", members: [b.dataset.bl] }) }); loadBlacklist(group) } catch (e) { toast(e.message) }
+    })
+  } catch (e) { $("#blTable").innerHTML = `<tr><td style="color:#dc2626">${esc(e.message)}</td></tr>` }
+}
+$("#blReload").onclick = () => loadBlacklist($("#grpSel").value)
+$("#blAdd").onclick = async () => {
+  const member = $("#blInput").value.trim(); if (!member) return
+  try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group: $("#grpSel").value, op: "add", members: [member] }) }); $("#blInput").value=""; loadBlacklist($("#grpSel").value) } catch (e) { toast(e.message) }
+}
+$("#blDel").onclick = async () => {
+  const member = $("#blInput").value.trim(); if (!member) return
+  try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group: $("#grpSel").value, op: "del", members: [member] }) }); $("#blInput").value=""; loadBlacklist($("#grpSel").value) } catch (e) { toast(e.message) }
 }
 $("#grpReload").onclick = loadGroups
 $("#grpSel").onchange = () => loadMembers($("#grpSel").value)
@@ -336,6 +372,37 @@ $("#qrStart").onclick = async () => {
       } catch (e) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = e.message }
     }, 2000)
   } catch (e) { $("#qrMsg").textContent = e.message }
+}
+
+/* menu / panels */
+async function loadMenu() {
+  try {
+    const data = await api("/api/menu?bot=" + encodeURIComponent(state.bot))
+    $("#menuJson").value = data.menu ? JSON.stringify(data.menu, null, 2) : ""
+    const panels = data.panels || []
+    $("#panelTable").innerHTML = "<tr><th>panel_id</th><th>摘要</th><th>操作</th></tr>" +
+      (panels.map(p => `<tr><td>${esc(p.panel_id)}</td><td class="muted">${esc(JSON.stringify(p.panel || p).slice(0,80))}</td><td><button class="danger" data-panel="${esc(p.panel_id)}">删除</button></td></tr>`).join("") || "<tr><td colspan=3 class='muted'>暂无面板</td></tr>")
+    $("#panelTable").querySelectorAll("[data-panel]").forEach(b => b.onclick = async () => {
+      if (!confirm("删除指令面板 " + b.dataset.panel + "？")) return
+      try { await api("/api/panel?bot=" + encodeURIComponent(state.bot) + "&id=" + encodeURIComponent(b.dataset.panel), { method: "DELETE" }); loadMenu() } catch (e) { toast(e.message) }
+    })
+  } catch (e) { toast(e.message) }
+}
+$("#menuLoad").onclick = loadMenu
+$("#panelReload").onclick = loadMenu
+$("#menuSave").onclick = async () => {
+  try {
+    const menu = JSON.parse($("#menuJson").value || "{}")
+    await api("/api/menu", { method: "PUT", body: JSON.stringify({ bot: state.bot, menu }) })
+    $("#menuMsg").textContent = "已保存"
+  } catch (e) { $("#menuMsg").textContent = e.message }
+}
+$("#panelCreate").onclick = async () => {
+  try {
+    const panel = JSON.parse($("#panelJson").value || "{}")
+    await api("/api/panel", { method: "POST", body: JSON.stringify({ bot: state.bot, panel }) })
+    $("#panelMsg").textContent = "已创建"; loadMenu()
+  } catch (e) { $("#panelMsg").textContent = e.message }
 }
 
 /* boot */
