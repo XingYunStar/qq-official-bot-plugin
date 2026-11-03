@@ -325,13 +325,16 @@ const adapter = new (class QQBotAdapter {
     return text.replace(/@/g, "@​").replace(/<qqbot-/g, "<qqbot-​")
   }
 
-  async makeBotImage(file) {
+  async makeBotImage(file, data) {
     if (!config.toBotUpload) return
     const buffer = Buffer.isBuffer(file) ? file : await Bot.Buffer(file).catch(() => null)
+    // qqbot-media:// 与机器人绑定：必须用「当前发消息的机器人」上传，
+    // 用别的机器人上传的素材，发消息时会加载失败（40035010）
+    const bots = data?.self_id ? [data.self_id] : Bot.uin
     // 官方素材管理：上传后拿到 qqbot-media:// 引用，可直接写进 Markdown，不需要公网 URL
     if (Buffer.isBuffer(buffer)) {
       const md5 = crypto.createHash("md5").update(buffer).digest("hex")
-      for (const i of Bot.uin) {
+      for (const i of bots) {
         const sdk = Bot[i]?.sdk
         if (!sdk?.uploadMaterialImage) continue
         const cached = this.getMaterial(i, md5)
@@ -363,7 +366,7 @@ const adapter = new (class QQBotAdapter {
       }
     }
     // 兼容其他上传接口
-    for (const i of Bot.uin) {
+    for (const i of bots) {
       if (!Bot[i].uploadImage) continue
       try {
         const image = await Bot[i].uploadImage(buffer || file)
@@ -400,7 +403,7 @@ const adapter = new (class QQBotAdapter {
   async makeMarkdownImage(data, file, summary = "图片", noCompress = false) {
     if (sharp && !noCompress) file = await this.compressImage(data, file)
     const buffer = await Bot.Buffer(file)
-    const image = (await this.makeBotImage(buffer)) || { url: await Bot.fileToUrl(file) }
+    const image = (await this.makeBotImage(buffer, data)) || { url: await Bot.fileToUrl(file) }
 
     if (!image.width || !image.height)
       try {

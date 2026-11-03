@@ -1106,6 +1106,45 @@ console.log("\n=== W. 连接时按时间戳清理 ===")
   bot.sdk.deleteMaterialImage = oldDel
 }
 
+console.log("\n=== X. 素材绑定发送机器人 ===")
+{
+  const oldUin = [...Bot.uin]
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  )
+  const calls = []
+  const oldUpload = Bot["10001"].sdk.uploadMaterialImage
+  Bot["10001"].sdk.uploadMaterialImage = async () => {
+    calls.push("10001")
+    return { image_id: "a", url: "qqbot-media://a", ttl: 1 }
+  }
+  Bot["10002"] = {
+    id: "10002",
+    sdk: {
+      uploadMaterialImage: async () => {
+        calls.push("10002")
+        return { image_id: "b", url: "qqbot-media://b", ttl: 1 }
+      },
+      deleteMaterialImage: async () => {},
+    },
+  }
+  Bot.uin.push("10001", "10002")
+  adapter.materials["10002"] = new Map()
+  adapter.materialMd5["10002"] = new Map()
+  const image = await adapter.makeBotImage(png, { self_id: "10002" })
+  assert(
+    "素材上传使用发送机器人",
+    calls.length === 1 && calls[0] === "10002" && image.url === "qqbot-media://b",
+    JSON.stringify(calls),
+  )
+  if (oldUpload) Bot["10001"].sdk.uploadMaterialImage = oldUpload
+  else delete Bot["10001"].sdk.uploadMaterialImage
+  delete Bot["10002"]
+  Bot.uin.length = 0
+  Bot.uin.push(...oldUin)
+}
+
 console.log("\n=== I. 冲突保护 / 退出 ===")
 {
   const conflict = { id: "QQBot", name: "QQBot" }
