@@ -260,10 +260,11 @@ markdown:
 - 地址：`http://<服务器IP>:2580/`
 - 密码：TRSS 启动日志里的 `[QQBot WebUI] 密码`（彩色 `logger.info`），同时保存在 `data/QQBot/webui.json`
 - 功能：
-  - 配置：编辑 `config/QQBot.yaml`、`config/config/server.yaml`、`other.yaml`、`bot.yaml`，未上线机器人也可以先配置
+  - 配置：编辑 `config/*.yaml` 与 `config/config/*.yaml`（含 QQBot.yaml、server.yaml、other.yaml），未上线机器人也可以先配置
   - 日志：历史日志查看、实时日志（SSE）
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）
-  - 群管理：群列表、成员列表、禁言/解除/踢人
+  - 群管理：群列表、成员列表、禁言/解除/踢人、群黑名单
+  - 菜单/指令面板：自定义菜单 JSON 编辑、指令面板创建/删除
   - 运营数据：今天 / 昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围
 
 ### Docker 反向代理

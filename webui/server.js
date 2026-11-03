@@ -74,8 +74,15 @@ function parseCookies(req) {
   return out
 }
 
-function configFiles() {
-  return ["config/QQBot.yaml", "config/config/server.yaml", "config/config/other.yaml", "config/config/bot.yaml"]
+async function configFiles() {
+  const files = new Set(["config/QQBot.yaml"])
+  for (const dir of ["config", "config/config"]) {
+    try {
+      for (const name of await fs.readdir(dir))
+        if (/\.(ya?ml)$/.test(name)) files.add(`${dir}/${name}`)
+    } catch {}
+  }
+  return [...files]
 }
 
 const statsRange = { "7d": 0, "14d": 1, "30d": 2 }
@@ -177,14 +184,14 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           port,
           bots,
           authFile: AUTH_FILE,
-          configFiles: configFiles(),
+          configFiles: await configFiles(),
         })
       }
 
       // ---- config ----
       if (pathname === "/api/config" && req.method === "GET") {
         const file = url.searchParams.get("file") || "config/QQBot.yaml"
-        if (!configFiles().includes(file)) return json(res, 400, { error: "不允许的文件" })
+        if (!(await configFiles()).includes(file)) return json(res, 400, { error: "不允许的文件" })
         try {
           const content = await fs.readFile(file, "utf8")
           return json(res, 200, { file, content })
@@ -195,7 +202,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       if (pathname === "/api/config" && req.method === "PUT") {
         const body = JSON.parse((await readBody(req)) || "{}")
         const file = body.file
-        if (!configFiles().includes(file)) return json(res, 400, { error: "不允许的文件" })
+        if (!(await configFiles()).includes(file)) return json(res, 400, { error: "不允许的文件" })
         let parsed
         try {
           parsed = YAML.parse(body.content || "")
@@ -316,6 +323,29 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           return json(res, 500, { error: String(err.message || err) })
         }
       }
+      if (pathname === "/api/group/blacklist" && req.method === "GET") {
+        const id = url.searchParams.get("bot")
+        const group = url.searchParams.get("group")
+        try {
+          const result = await Bot[id].sdk.groupService.getMemberBlacklist(group)
+          return json(res, 200, { users: result?.users || [] })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/group/blacklist" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        const { bot, group, op, members } = body
+        try {
+          const result = await Bot[bot].sdk.groupService.updateMemberBlacklist(group, {
+            op: op === "add" ? "add" : "del",
+            member_openids: members || [],
+          })
+          return json(res, 200, result || { ok: true })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
       if (pathname === "/api/group/action" && req.method === "POST") {
         const body = JSON.parse((await readBody(req)) || "{}")
         const { bot, group, action, member, seconds, blacklist } = body
@@ -324,6 +354,52 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           else if (action === "unmute") await adapter.muteMember(bot, group, member, 0)
           else if (action === "kick") await adapter.kickMember(bot, group, member, !!blacklist)
           else return json(res, 400, { error: "未知操作" })
+          return json(res, 200, { ok: true })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+
+      // ---- menu / command panels ----
+      if (pathname === "/api/menu" && req.method === "GET") {
+        const id = url.searchParams.get("bot")
+        try {
+          const service = Bot[id].sdk.menuPanelService
+          const [menu, panels] = await Promise.all([
+            service.getCustomMenu().catch(() => null),
+            service.getCommandPanels({}).catch(() => null),
+          ])
+          return json(res, 200, {
+            menu: menu?.menu ?? menu ?? null,
+            panels: panels?.panels ?? panels?.list ?? panels ?? [],
+          })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/menu" && req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        try {
+          const result = await Bot[body.bot].sdk.menuPanelService.updateCustomMenu(body.menu)
+          return json(res, 200, result || { ok: true })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/panel" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        try {
+          const result = await Bot[body.bot].sdk.menuPanelService.createCommandPanel(body.panel)
+          return json(res, 200, result || { ok: true })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/panel" && req.method === "DELETE") {
+        const id = url.searchParams.get("bot")
+        const panelId = url.searchParams.get("id")
+        try {
+          await Bot[id].sdk.menuPanelService.deleteCommandPanel(panelId)
           return json(res, 200, { ok: true })
         } catch (err) {
           return json(res, 500, { error: String(err.message || err) })
