@@ -8,6 +8,8 @@
  * 只对 adapter_id === "QQBot"（qq-official-bot 适配器）生效，不影响 ICQQ 等其它适配器。
  * 注意：禁言/踢人/入群审批需要机器人在群内是管理员，部分接口还需开放平台申请权限。
  */
+import fs from "node:fs/promises"
+
 const ADAPTER_ID = "QQBot"
 /** 测试期如需放开所有群管理权限，改成 true（默认按群主/管理员校验） */
 const SKIP_PERMISSION_CHECK = false
@@ -117,6 +119,10 @@ export class QQBotAdapterTest extends plugin {
         { reg: "^#qqbot测试$", fnc: "help" },
         { reg: "^#qqbot(连发|发送10条)$", fnc: "burst" },
         { reg: "^#qqbot(9[Mm][Bb]?|大图)$", fnc: "bigImage" },
+        { reg: "^#qqbot(图文|卡片)$", fnc: "card" },
+        { reg: "^#qqbot(webui|WebUI)$", fnc: "webui" },
+        { reg: "^#qqbot登录$", fnc: "qqLogin" },
+        { reg: "^#qqbot数据(.*)$", fnc: "stats" },
         { reg: "^#qqbot撤回$", fnc: "recall" },
         { reg: "^#qqbot禁言", fnc: "mute" },
         { reg: "^#qqbot踢人", fnc: "kick" },
@@ -159,6 +165,10 @@ export class QQBotAdapterTest extends plugin {
         "#qqbot撤回 —— 发送一条测试消息并撤回（引用消息时撤回被引用的那条）",
         "#qqbot连发 —— 连续发送 10 条消息（测试被动回复消息池）",
         "#qqbot9MB —— 发送一张 9MB 测试图片（素材上传/大图测试）",
+        "#qqbot图文 —— 发送一条图文卡片消息（群聊/单聊）",
+        "#qqbotwebui —— 查看 WebUI 地址和密码位置",
+        "#qqbot登录 —— 查看 QQ 开放平台登录方式（WebUI 导入 Cookie）",
+        "#qqbot数据 [today/yesterday/7d/14d/30d] —— 查看运营数据",
         "#qqbot禁言 @某人 [秒数] —— 禁言，秒数 0 为解除，默认 600",
         "#qqbot踢人 @某人 [拉黑] —— 踢出群，带「拉黑」同时加入群黑名单",
         "#qqbot身份 [@某人] —— 查询群成员身份（群主/管理员/成员）",
@@ -177,6 +187,95 @@ export class QQBotAdapterTest extends plugin {
   }
 
   /** 撤回：优先撤回被引用的消息，否则发一条再撤回 */
+  async webui() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    const port = e.bot?.adapter?.webui?.port || 2580
+    return e.reply(
+      [
+        `QQBot WebUI：http://<服务器IP>:${port}/`,
+        "密码：TRSS 启动日志里的 [QQBot WebUI] 密码，或 data/QQBot/webui.json",
+        "Docker 部署需要把宿主机端口反向代理到容器内 IP:端口",
+      ].join("\n"),
+    )
+  }
+
+  async qqLogin() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    try {
+      const auth = JSON.parse(await fs.readFile("data/QQBot/webui.json", "utf8"))
+      if (auth.qqCookie)
+        return e.reply("QQ 开放平台登录态已保存，可直接发送 #qqbot数据 查看运营数据")
+    } catch {}
+    const port = e.bot?.adapter?.webui?.port || 2580
+    return e.reply(
+      [
+        "QQ 开放平台登录：",
+        `1. 打开 WebUI：http://<服务器IP>:${port}/`,
+        "2. 进入「QQ 登录」，把浏览器里 q.qq.com 的 Cookie 粘贴进去保存",
+        "3. 回到这里发送 #qqbot数据 查看运营数据",
+      ].join("\n"),
+    )
+  }
+
+  async stats() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    const range = (e.msg.replace(/^#qqbot数据/, "").trim() || "7d").toLowerCase()
+    const days = { today: 1, yesterday: 2, "7d": 7, "14d": 14, "30d": 30 }[range] || 7
+    const dataRange = days <= 7 ? 0 : days <= 14 ? 1 : 2
+    let auth
+    try {
+      auth = JSON.parse(await fs.readFile("data/QQBot/webui.json", "utf8"))
+    } catch {}
+    if (!auth?.qqCookie) return e.reply("还没有 QQ 开放平台登录态，请先发送 #qqbot登录 查看步骤")
+    const appid = e.bot?.info?.appid
+    if (!appid) return e.reply("没有找到 AppID，无法查询运营数据")
+    try {
+      const res = await fetch("https://bot.q.qq.com/cgi-bin/v2/datareport/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: auth.qqCookie },
+        body: JSON.stringify({ bot_appid: Number(appid), data_range: dataRange, data_type: 4 }),
+      })
+      const data = await res.json()
+      if (data.retcode !== 0) return e.reply(`查询失败：${data.msg || data.retcode}`)
+      const rows = (data.data?.developer_metrics_data || []).slice().sort((a, b) => String(a.report_date).localeCompare(String(b.report_date)))
+      const use = days === 1 ? rows.slice(-1) : days === 2 ? rows.slice(-2, -1) : rows.slice(-days)
+      const sum = key => use.reduce((n, r) => n + Number(r[key] || 0), 0)
+      const messages = use.reduce((n, r) => n + Number(r.up_msg?.total || 0), 0)
+      const last = use[use.length - 1] || {}
+      return e.reply(
+        [
+          `运营数据（${range}，${use.length} 天）：`,
+          `活跃用户：${sum("active_user_cnt")}`,
+          `消息量：${messages}`,
+          `新增用户：${sum("new_user_cnt")}`,
+          `总好友/总群：${last.friends?.stock_cnt || 0} / ${last.groups?.stock_cnt || 0}`,
+        ].join("\n"),
+      )
+    } catch (err) {
+      return e.reply(`查询运营数据失败：${errText(err)}`)
+    }
+  }
+
+  /** 发送一条图文卡片（群聊/单聊） */
+  async card() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    await e.reply({
+      type: "card",
+      content: {
+        title: "QQ 官方机器人 · 图文卡片",
+        description: "来自 qq-official-bot-plugin 的图文卡片消息测试",
+        url: "https://github.com/XingYunStar/qq-official-bot-plugin",
+        pic_url:
+          "https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg",
+      },
+    })
+    return true
+  }
+
   /** 发送一张 9MB 图片（公网 URL），测试素材上传/大图压缩 */
   async bigImage() {
     const e = this.e

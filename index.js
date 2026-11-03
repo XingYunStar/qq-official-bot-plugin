@@ -11,6 +11,7 @@ import { ulid } from "ulid"
 import imageSize from "image-size"
 import urlRegexSafe from "url-regex-safe"
 import { encode as encodeSilk, isSilk } from "silk-wasm"
+import { startWebUI } from "./webui/server.js"
 import QQBot from "qq-official-bot"
 import QQBotEd25519Module from "qq-official-bot/lib/ed25519.js"
 
@@ -149,6 +150,11 @@ const { config, configSave } = await makeConfig(
     imageLength: 3,
     autoInstallExample: true,
     exampleGuideSent: false,
+    webui: {
+      enabled: true,
+      port: 2580,
+      host: "0.0.0.0",
+    },
     markdown: {
       template: "abcdefghij",
     },
@@ -181,7 +187,7 @@ const adapter = new (class QQBotAdapter {
     this.id = "QQBot"
     this.name = "QQBot"
     this.path = "data/QQBot/"
-    this.version = "qq-official-bot v1.3.3"
+    this.version = "qq-official-bot v1.3.4"
 
     // URL 处理方式：qrcode=转二维码（旧行为）、link=转 Markdown 链接、off=原样发送
     this.urlMode = "off"
@@ -244,6 +250,54 @@ const adapter = new (class QQBotAdapter {
    * 插件内部沿用旧版 qq-group-bot 的扁平消息元素结构，
    * 发送前统一转换为 qq-official-bot 的 { type, data } 结构
    */
+  /** 把 TRSS/插件传入的图文卡片元素规范成 SDK 需要的 { type:"card", data:{ type:"tuwen", content } } */
+  normalizeCard(el) {
+    const raw = el?.data ?? el?.card ?? el
+    const content = raw?.content && typeof raw.content === "object" ? raw.content : raw
+    if (!content || typeof content !== "object") return null
+    const title = String(content.title ?? "").trim()
+    const url = String(content.url ?? content.link ?? "").trim()
+    const pic_url = String(content.pic_url ?? content.picUrl ?? content.image ?? "").trim()
+    if (!title || !url || !pic_url) return null
+    return {
+      type: "card",
+      data: {
+        type: "tuwen",
+        content: {
+          title: title.slice(0, 50),
+          description: String(content.description ?? title).trim().slice(0, 200),
+          url,
+          pic_url,
+        },
+      },
+    }
+  }
+
+  cardToText(el) {
+    const raw = el?.data ?? el?.card ?? el
+    const content = raw?.content && typeof raw.content === "object" ? raw.content : raw
+    if (!content || typeof content !== "object") return Bot.String(el)
+    return [content.title, content.description, content.url].filter(Boolean).join("\n")
+  }
+
+  /** 图文卡片只能单独成条（msg_type=8），把卡片从普通消息里拆出来 */
+  splitCardMessages(msg) {
+    const list = Array.isArray(msg) ? msg : [msg]
+    const parts = []
+    let batch = []
+    for (const i of list) {
+      if (i && typeof i === "object" && i.type === "card") {
+        if (batch.length) {
+          parts.push(batch)
+          batch = []
+        }
+        parts.push([i])
+      } else batch.push(i)
+    }
+    if (batch.length) parts.push(batch)
+    return parts
+  }
+
   toSdkMessage(msg, ctx) {
     const list = Array.isArray(msg) ? msg : [msg]
     return list.map(el => {
@@ -261,6 +315,10 @@ const adapter = new (class QQBotAdapter {
         }
         case "at":
           return { type, data: { ...data, user_id: data.user_id ?? data.qq } }
+        case "card": {
+          const card = this.normalizeCard(el)
+          return card || { type: "text", data: { text: this.cardToText(el) } }
+        }
         default:
           return { type, data }
       }
@@ -960,6 +1018,15 @@ const adapter = new (class QQBotAdapter {
     return messages
   }
 
+  async buildMessages(data, msg, source) {
+    if (!config.markdown[data.self_id] || config.markdown[data.self_id] === "raw")
+      return this.makeRawMarkdownMsg(data, msg, true, source)
+    if (config.markdown[data.self_id] === "legacy") return this.makeMsg(data, msg, source)
+    if (config.markdown[data.self_id] === "inline")
+      return this.makeRawMarkdownMsg(data, msg, false, source)
+    return this.makeMarkdownMsg(data, msg, source)
+  }
+
   async sendMsg(data, send, msg) {
     const rets = { message_id: [], data: [], error: [] },
       source = {}
@@ -996,13 +1063,10 @@ const adapter = new (class QQBotAdapter {
         }
     }
 
-    if (!config.markdown[data.self_id] || config.markdown[data.self_id] === "raw")
-      msgs = await this.makeRawMarkdownMsg(data, msg, true, source)
-    else if (config.markdown[data.self_id] === "legacy")
-      msgs = await this.makeMsg(data, msg, source)
-    else if (config.markdown[data.self_id] === "inline")
-      msgs = await this.makeRawMarkdownMsg(data, msg, false, source)
-    else msgs = await this.makeMarkdownMsg(data, msg, source)
+    msgs = []
+    for (const part of this.splitCardMessages(msg))
+      if (part.length === 1 && part[0]?.type === "card") msgs.push(part)
+      else msgs.push(...(await this.buildMessages(data, part, source)))
 
     if ((await sendMsg()) === false) {
       msgs = await this.makeMsg(data, msg, source)
@@ -1067,6 +1131,9 @@ const adapter = new (class QQBotAdapter {
         case "file":
           if (i.file) i.file = await Bot.fileToUrl(i.file, i)
           i = { type: "text", text: `文件：${i.file}` }
+          break
+        case "card":
+          i = { type: "text", text: this.cardToText(i) }
           break
         case "reply":
           reply = i
@@ -2208,7 +2275,9 @@ const adapter = new (class QQBotAdapter {
       self_id: id,
       post_type: event.post_type,
       message_type: event.message_type,
-      sub_type: event.sub_type,
+      // qq-official-bot 1.3.4 起 group 事件的 sub_type 是 at/normal，
+      // TRSS 侧仍使用 normal，避免消息事件名变成 message.group.at
+      sub_type: event.message_type === "group" ? "normal" : event.sub_type,
       message_id: event.message_id,
       time: event.timestamp,
       get user_id() {
@@ -3042,6 +3111,11 @@ const adapter = new (class QQBotAdapter {
       )
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
+    try {
+      this.webui = startWebUI({ adapter, config, configSave, Bot, logger })
+    } catch (err) {
+      Bot.makeLog("error", ["QQBot WebUI 启动失败", err], this.id)
+    }
     for (const token of config.token) {
       const connect = this.connect(token)
       await Bot.sleep(5000, connect)

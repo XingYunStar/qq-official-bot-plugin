@@ -12,7 +12,7 @@
 
 ## 简介
 
-本插件是 [Yunzai-QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)（基于 [`qq-group-bot`](https://www.npmjs.com/package/qq-group-bot)）的**新版实现**，改用持续维护的 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 1.3.3，在保留旧版配置、命令、数据目录的基础上，补上了旧版缺失的一批官方能力。
+本插件是 [Yunzai-QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)（基于 [`qq-group-bot`](https://www.npmjs.com/package/qq-group-bot)）的**新版实现**，改用持续维护的 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 1.3.4，在保留旧版配置、命令、数据目录的基础上，补上了旧版缺失的一批官方能力。
 
 - 适配器 ID、`config/QQBot.yaml`、`data/QQBot/`、`#QQBotxxx` 命令全部沿用旧版，**可以从旧版直接迁移**
 - 收发消息内部仍使用 TRSS 熟悉的扁平消息结构，仅在适配器边界转换成 `qq-official-bot` 的 `{ type, data }`
@@ -194,6 +194,7 @@ https:
 | **URL 处理** | `toQRCode: true` 转二维码（旧行为）、`"link"` 转 Markdown 链接 `[host](url)`、`false` 原样发送 |
 | **稳定性** | 断线退避重连、心跳超时探测、access_token 失败无限重试、重复连接清理、与旧插件冲突时自动跳过连接 |
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
+| **WebUI** | 内置管理面板：配置、日志（历史/实时）、素材、群成员、运营数据；密码在日志和 `data/QQBot/webui.json` |
 | **测试插件自动安装** | 首次启动把 `example/qqbot-test.js` 复制到 `plugins/example/`，并向 master 发送使用说明（单聊） |
 
 ## 配置
@@ -219,6 +220,11 @@ hideGuildRecall: false
 imageLength: 3
 autoInstallExample: true  # 首次启动把测试插件装到 plugins/example/
 
+webui:
+  enabled: true
+  port: 2580
+  host: 0.0.0.0
+
 markdown:
   "114514": raw         # raw / inline / legacy / 模板ID
 ```
@@ -232,6 +238,7 @@ markdown:
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
 | `toBotUpload` | 是否把 Markdown 图片上传到官方素材（`qqbot-media://`），默认 `true` |
 | `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
+| `webui` | WebUI 配置：`enabled` / `port`（默认 2580）/ `host`（默认 0.0.0.0） |
 | `reconnect` | 重连/心跳参数，同旧版 |
 | 其余 | `toCallback` / `hideGuildRecall` / `imageLength` / `permission` 同旧版 |
 
@@ -245,6 +252,55 @@ markdown:
   - 收到的消息保留 **24 小时**，机器人自己发的消息保留 **7 天**
   - 每次启动时清理过期记录并原子重写；运行中每 10 分钟清理内存，按需压缩文件
   - 这样即使 TRSS 每天只运行 1 分钟，也能在启动时完成清理
+
+## WebUI
+
+插件启动时会在 `2580` 端口启动 WebUI（可在 `config/QQBot.yaml` 的 `webui` 中修改）：
+
+- 地址：`http://<服务器IP>:2580/`
+- 密码：TRSS 启动日志里的 `[QQBot WebUI] 密码`（彩色 `logger.info`），同时保存在 `data/QQBot/webui.json`
+- 功能：
+  - 配置：编辑 `config/QQBot.yaml`、`config/config/server.yaml`、`other.yaml`、`bot.yaml`，未上线机器人也可以先配置
+  - 日志：历史日志查看、实时日志（SSE）
+  - 素材：查看/删除 Markdown 素材（`qqbot-media://`）
+  - 群管理：群列表、成员列表、禁言/解除/踢人
+  - 运营数据：今天 / 昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围
+
+### Docker 反向代理
+
+WebUI 监听容器内 `0.0.0.0:2580`，需要把宿主机端口反向代理到容器内 IP：
+
+```bash
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' TRSS
+```
+
+Nginx 示例：
+
+```nginx
+location /qqbot-webui/ {
+    proxy_pass http://<容器IP>:2580/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    # 实时日志使用 SSE，关闭缓冲
+    proxy_buffering off;
+}
+```
+
+也可以直接把宿主机 `2580` 端口映射到容器 `2580`。
+
+### QQ 开放平台登录
+
+运营数据来自 `q.qq.com` 后台接口，需要 QQ 开放平台登录态：
+
+1. 浏览器登录 https://q.qq.com ，打开开发者后台
+2. F12 → Network，复制任意请求的 `Cookie` 请求头
+3. WebUI →「QQ 登录」→ 粘贴 Cookie → 保存
+4. 回到「运营数据」即可查看
+
+> 官方数据接口只提供最近 7/14/30 天；本月、总览、自定义范围基于 30 天数据计算。
 
 ## 测试插件（example/qqbot-test.js）
 
@@ -263,6 +319,10 @@ markdown:
 | `#qqbot撤回` | 撤回测试消息；引用消息时撤回被引用那条 |
 | `#qqbot连发` | 连续发送 10 条消息（测试被动回复消息池） |
 | `#qqbot9MB` | 发送一张 9MB 测试图片（URL，不压缩，素材上传/大图测试） |
+| `#qqbot图文` | 发送一条图文卡片消息（群聊/单聊） |
+| `#qqbotwebui` | 查看 WebUI 地址和密码位置 |
+| `#qqbot登录` | 查看 QQ 开放平台登录方式（WebUI 导入 Cookie） |
+| `#qqbot数据 [today/yesterday/7d/14d/30d]` | 查看运营数据 |
 | `#qqbot禁言 @某人 [秒数]` | 禁言，`0` 为解除（需要机器人是群管理员） |
 | `#qqbot踢人 @某人 [拉黑]` | 踢人，可选加入群黑名单 |
 | `#qqbot进群申请` | 待审批入群申请列表 |
@@ -288,7 +348,7 @@ master:
 
 ## 与旧版的差异
 
-- SDK：`qq-group-bot` 1.1.0（停更）→ `qq-official-bot` 1.3.3（持续维护）
+- SDK：`qq-group-bot` 1.1.0（停更）→ `qq-official-bot` 1.3.4（持续维护）
 - 域名：`api.sgroup.qq.com` → `api.bot.qq.com`（`sandbox` 已废弃）
 - 配置：不再需要 Token，格式为 `机器人QQ号:AppID:AppSecret:...`；旧版含 Token 的配置仍可识别（Token 被忽略）
 - Intents：`GROUP_AT_MESSAGE_CREATE` + `C2C_MESSAGE_CREATE` 合并为 `GROUP_AND_C2C_EVENT`
@@ -313,7 +373,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（136 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（139 条断言）。
 
 ## 致谢
 
