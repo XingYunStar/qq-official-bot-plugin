@@ -421,8 +421,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
 
   server.on("error", err => logger.error(logger.red(`[QQBot WebUI] 启动失败：${err.message || err}`)))
 
-  server.listen(port, host, async () => {
-    const authData = await auth
+  auth.then(authData => {
     logger.info(logger.magenta("================ QQBot WebUI ================"))
     logger.info(logger.magenta(`地址：http://127.0.0.1:${port}/`))
     logger.info(logger.magenta(`密码：${authData.password}`))
@@ -430,6 +429,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
     logger.info(logger.magenta("Docker 部署请把宿主机端口反向代理到容器内 IP:端口"))
     logger.info(logger.magenta("============================================"))
   })
+  server.listen(port, host, () => {})
 
   running = { server, port, auth }
   return running
