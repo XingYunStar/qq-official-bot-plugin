@@ -56,7 +56,7 @@ pnpm install
 打开 [QQ 开放平台](https://q.qq.com) 创建 Bot：
 
 1. 创建机器人
-2. 开发设置 → 得到 `机器人QQ号:AppID:Token:AppSecret`
+2. 开发设置 → 得到 `机器人QQ号:AppID:AppSecret`
 
 ### 4. 配置账号
 
@@ -67,7 +67,7 @@ pnpm install
 
 格式示例：
 
-> 机器人QQ号 `3889012345`、AppID `102345678`、Token `AbCdEfGhIjKlMnOpQrStUvWxYz123432`、AppSecret `aBcDeFgHiJkLmNoPqRsTuVwXyZ123432`、群Bot `1`、频道私域 `0`
+> 机器人QQ号 `3889012345`、AppID `102345678`、AppSecret `aBcDeFgHiJkLmNoPqRsTuVwXyZ123432`、群Bot `1`、频道私域 `0`
 
 - WebSocket 模式（推荐）
 
@@ -82,6 +82,31 @@ pnpm install
 ```
 
 > 已不再需要 Token。旧版 `机器人QQ号:AppID:Token:AppSecret:...` 的配置仍然兼容，Token 会被自动忽略。
+
+<details>
+<summary>群Bot / 频道私域是什么？</summary>
+
+这两个字段对应 QQ 开放平台的 **intents（事件订阅位）**，决定平台把哪些事件推给机器人：
+
+| 字段 | 值 | 对应 intent | 结果 |
+| --- | --- | --- | --- |
+| 群Bot | `1` | `GROUP_AND_C2C_EVENT`（1<<25） | 接收群 @消息、群全量消息（需群主开启）、C2C 单聊、群成员增减、入群申请等事件 |
+| 群Bot | `0` | 不订阅 | 收不到群/单聊事件，表现是「机器人在群里但 @ 没反应」 |
+| 群Bot | `2` | WebHook | 不建立 WebSocket，事件由开放平台回调推送 |
+| 频道私域 | `1` | `GUILD_MESSAGES`（1<<9） | **私域**频道机器人，接收频道内全部消息（`MESSAGE_CREATE`） |
+| 频道私域 | `0` | `PUBLIC_GUILD_MESSAGES`（1<<30） | **公域**频道机器人，只接收 @机器人 / 回复机器人的消息（`AT_MESSAGE_CREATE`） |
+
+> 注意：`GUILD_MESSAGES` 只有私域机器人能设置；公域机器人填 `1` 可能因无权限导致 WebSocket 鉴权报错。群机器人需要机器人本身具备群能力。
+
+官方文档：
+
+- [事件订阅与通知 · Intents](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#%E4%BA%8B%E4%BB%B6%E8%AE%A2%E9%98%85intents)
+- [频道消息事件](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/channel/message/event.html)
+- [群@机器人消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_at_message_create.html)
+- [群消息（全量模式）](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html)
+- [单聊消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/c2c_message_create.html)
+
+</details>
 
 ### 5. 发送图片 / MD 消息
 <details>
