@@ -10,6 +10,21 @@
 
 ---
 
+## 界面预览
+
+> 截图来自实际运行中的 TRSS-Yunzai 容器。
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="群聊界面" width="49%">
+  <img src="docs/screenshots/system.png" alt="系统状态" width="49%">
+</p>
+
+<p align="center">
+  群聊实时消息、成员身份、引用/图片/文件卡片 · 系统负载、CPU、内存、SWAP、磁盘与网络状态
+</p>
+
+---
+
 ## 简介
 
 本插件是 [Yunzai-QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)（基于 [`qq-group-bot`](https://www.npmjs.com/package/qq-group-bot)）的**新版实现**，改用持续维护的 [`qq-official-bot`](https://www.npmjs.com/package/qq-official-bot) 1.3.4，在保留旧版配置、命令、数据目录的基础上，补上了旧版缺失的一批官方能力。
@@ -185,7 +200,7 @@ https:
 | **群引用（收）** | QQ 群引用不在 `message_reference`，而在 `msg_elements`（`message_type=103`）+ `message_scene.ext`；插件会自动补 `reply` 元素、还原真实消息 ID，`e.getReply()` 可读取被引用内容 |
 | **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；被动回复的 `msg_id` 由消息池决定 |
 | **被动回复池** | 官方限制同一条群消息最多回复 5 条：插件会记录收到的群消息 ID（有效期 110 秒），发送时优先用最旧、未满 5 次的那个，避免一条消息被回复满后无法继续回复；没有有效消息时走主动消息 |
-| **MD 图片素材** | 通过官方素材管理上传图片（使用**发消息的那个机器人**上传，`qqbot-media://` 与机器人绑定），Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传后 **1 分钟自动删除**；按 Buffer MD5 复用（记录持久化），复用次数最高的 **20 张**不会被 1 分钟清理；每天清理复用次数=1 的记录、每周只保留复用次数最高的 20 张；素材达到 **100 张**或平台返回数量上限错误时立即清空全部素材并重试；上传失败自动回退到 `server.yaml` 的 `url` |
+| **MD 图片素材** | 通过官方素材管理上传图片（使用**发消息的那个机器人**上传，`qqbot-media://` 与机器人绑定），Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传后 **1 分钟自动删除未复用的图**（复用次数=0）；按 Buffer MD5 复用（记录持久化），复用次数最高的 **20 张**不会被 1 分钟清理；每天清理复用次数=0 的记录、每周只保留复用次数最高的 20 张；素材达到 **100 张**或平台返回数量上限错误时立即清空全部素材并重试；上传失败自动回退到 `server.yaml` 的 `url` |
 | **群管理** | `e.group.muteMember()` 禁言、`e.group.kickMember()` 踢人、`e.group.getInfo()` 群信息、`e.group.getMemberInfo()` 成员信息；`e.member.is_admin / is_owner` |
 | **群通知** | 成员进群/退群 → `notice.group.increase/decrease`；入群申请 → `notice.group.join_request`；机器人被拉群 → `notice.group.bot.increase` |
 | **成员身份 / 昵称** | 优先使用消息事件 `author` / `mentions` 自带的 `member_role`、`username`，不依赖需要申请权限的「群成员详情」接口（接口报 `11253` 时自动回退） |
@@ -247,7 +262,9 @@ markdown:
 - `data/QQBot/<机器人QQ号>/materials.json`：素材复用记录（MD5、复用次数、image_id）
   - 上传/复用后延迟写盘，重启后仍可复用
   - **每次连接机器人**都会读取 `lastDaily` / `lastWeekly` 时间戳，判断是否达到清理时间；到期立即清理并写回时间戳（TRSS 每天只运行 1 分钟也能触发）
-  - **每天**清理复用次数 = 1 的记录；**每周**只保留复用次数最高的 20 张
+  - 首次上传复用次数 = 0，每次 MD5 复用 +1
+  - **1 分钟**后清理复用次数 = 0 的素材；复用过的保留
+  - **每天**清理复用次数 = 0 的记录；**每周**只保留复用次数最高的 20 张
 - `data/QQBot/<机器人QQ号>/refmap.ndjson`：`REFIDX` → 真实消息 ID 的引用索引
   - 收到的消息保留 **24 小时**，机器人自己发的消息保留 **7 天**
   - 每次启动时清理过期记录并原子重写；运行中每 10 分钟清理内存，按需压缩文件
@@ -258,14 +275,22 @@ markdown:
 插件启动时会在 `2580` 端口启动 WebUI（可在 `config/QQBot.yaml` 的 `webui` 中修改）：
 
 - 地址：`http://<服务器IP>:2580/`
-- 密码：TRSS 启动日志里的 `[QQBot WebUI] 密码`（彩色 `logger.info`），同时保存在 `data/QQBot/webui.json`；登录页也有「打印密码到日志」按钮（30 秒冷却，密码输出到 TRSS 日志）
+- 首次启动自动生成初始密码，打印在 TRSS 日志，也可在登录页点「打印密码到日志」（30 秒冷却）
+- **首次登录成功后必须设置自己的密码**；设置完成后不再打印初始密码
 - 功能：
+  - 前端：`webui/index.html` + `webui/style.css` + `webui/app.js`（结构/样式/逻辑分离，改前端刷新即可，不用重启）
   - 配置：编辑 `config/*.yaml` 与 `config/config/*.yaml`（含 QQBot.yaml、server.yaml、other.yaml），未上线机器人也可以先配置
-  - 日志：历史日志查看、实时日志（SSE）
+  - 日志：默认进入日志页即开始实时；hook 全局 `logger` 捕获所有插件日志，服务端按级别过滤并 220ms 批量推送；默认 INFO 及以上（隐藏 DEBUG/TRACE），可切全部/DEBUG/WARN/ERROR；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
+  - 系统状态：负载（1/5/15）、CPU、GPU（nvidia-smi）、内存、SWAP、磁盘、网络速率/网卡、Node 内存、运行时间、机器人数，3 秒自动刷新
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）
-  - 群管理：群列表、成员列表、禁言/解除/踢人、群黑名单
-  - 菜单/指令面板：自定义菜单 JSON 编辑、指令面板创建/删除
+  - 群管理：群头像/群名/成员数、总指令数/今日指令、群内能力（管理员、主动消息、全量消息）、成员列表、禁言/解除/踢人、群黑名单
+  - 群聊：仿 QQ 三栏界面，群列表/成员列表每 15 秒自动刷新（页面隐藏时暂停，没有刷新按钮），消息走 SSE 实时；聊天图片服务端缩略到 1200px 并缓存，避免超大截图解码卡顿；群头像用 q.qq.com / OneBot 群列表按群名匹配并缓存到 `data/QQBot/group-avatar-cache.json`，5 分钟尝试刷新，旧缓存不丢弃；成员昵称/头像/身份落盘 `data/QQBot/member-cache.json` 永久保存（缓存 5 分钟只用于控制读取频率，不删除旧成员）；右键成员可 @、按自定义时长禁言、解除、踢出，右键消息可复制文字/图片/链接、引用回复、撤回；@ 会去掉“机器人QQ:”前缀；发送失败的消息显示红色感叹号，可点击重试；支持搜索群名、发送文本、Markdown/LaTeX（含 QQ `[#32px #32px](url)` 图片尺寸语法）、粘贴图片、选择本地图片；Markdown 附件占位符会剥离，图片/文件按卡片展示；引用消息里的 @openid 自动显示昵称（包括机器人昵称）；输入框可拖高；记录最多保留 24 小时并落盘
+  - 本地群统计：按群记录消息量、指令使用量、每日趋势，保存在 `data/QQBot/group-stats.json`
+  - 菜单/指令面板：自定义菜单 JSON 编辑、指令面板创建/删除，内置可用的菜单/面板示例
   - 运营数据：今天 / 昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围
+  - 本地历史：WebUI 启动、登录和每 6 小时自动拉取官方 30 天数据并落盘 `data/QQBot/stats-history.json`，范围可以逐步超过 30 天；历史从启用本地采集后开始积累，官方不提供更早的回溯
+  - 完整指标：活跃/消息/好友/群/频道、新增/回流、回复数/回复率/首回率、响应时间/轮次、用户画像（年龄/性别/地区）、群分布（分类/规模）、趋势图、全字段表格、JSON 导出
+  - 前端增强：趋势图、命令面板（Ctrl+K）、日志搜索/暂停/下载、自动刷新、深色/浅色主题、移动端侧边栏
 
 ### Docker 反向代理
 
@@ -382,7 +407,7 @@ master:
 npm test
 ```
 
-离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（141 条断言）。
+离线集成测试：用桩替代 TRSS 框架与网络，但使用真实的 `qq-official-bot` 解析和真实插件代码，覆盖连接、消息解析、全量消息、群引用收发、元素转换、频道 multipart、被动回复消息池、Markdown 素材上传、引用索引持久化、群管理 API、通知、自动安装、master 说明、重连、冲突保护等（153 条断言）。
 
 ## 致谢
 

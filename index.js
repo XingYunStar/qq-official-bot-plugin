@@ -11,7 +11,12 @@ import { ulid } from "ulid"
 import imageSize from "image-size"
 import urlRegexSafe from "url-regex-safe"
 import { encode as encodeSilk, isSilk } from "silk-wasm"
-import { startWebUI } from "./webui/server.js"
+import { startWebUI, isWebUIInitialized } from "./webui/server.js"
+import { GroupStats } from "./components/group-stats.js"
+import { GroupChat, normalizeChatContent } from "./components/group-chat.js"
+import { MemberCache } from "./components/member-cache.js"
+import { parseTokenLine, formatTokenLine } from "./components/token.js"
+import { normalizeCard, cardToText, splitCardMessages } from "./components/card.js"
 import QQBot from "qq-official-bot"
 import QQBotEd25519Module from "qq-official-bot/lib/ed25519.js"
 
@@ -69,53 +74,6 @@ const REF_TTL_RECV = 24 * 60 * 60 * 1000
 const REF_TTL_SENT = 7 * 24 * 60 * 60 * 1000
 const REF_CLEAN_INTERVAL = 10 * 60 * 1000
 const REF_COMPACT_INTERVAL = 60 * 60 * 1000
-
-/**
- * 解析账号配置，兼容新旧两种格式（Token 已不再使用）：
- * 新：QQ号:AppID:AppSecret:是否群Bot:是否频道私域
- *     QQ号:AppID:AppSecret:2（WebHook）
- * 旧：QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域
- *     QQ号:AppID:Token:AppSecret:2（WebHook）
- */
-export function parseTokenLine(line) {
-  const parts = String(line ?? "").trim().split(":")
-  if (parts.length < 4) return null
-  const [id, appid] = parts
-  if (!/^\d{5,}$/.test(id) || !/^[A-Za-z0-9_-]+$/.test(appid)) return null
-  if (parts.length === 4) {
-    if (parts[3] !== "2") return null
-    return { id, appid, secret: parts[2], webhook: true, group: "0", private: "0" }
-  }
-  if (parts.length === 5) {
-    if (parts[4] === "2")
-      return {
-        id,
-        appid,
-        token: parts[2],
-        secret: parts[3],
-        webhook: true,
-        group: "0",
-        private: "0",
-      }
-    return { id, appid, secret: parts[2], webhook: false, group: parts[3], private: parts[4] }
-  }
-  // 旧格式：第 3 段是 Token，读取时忽略
-  return {
-    id,
-    appid,
-    token: parts[2],
-    secret: parts[3],
-    webhook: false,
-    group: parts[4],
-    private: parts[5],
-  }
-}
-
-/** 输出新格式（不含 Token） */
-export function formatTokenLine(info) {
-  if (info.webhook) return `${info.id}:${info.appid}:${info.secret}:2`
-  return `${info.id}:${info.appid}:${info.secret}:${info.group}:${info.private}`
-}
 
 /** 断线重连 / 心跳超时探测默认配置 */
 const reconnectDefault = {
@@ -250,52 +208,16 @@ const adapter = new (class QQBotAdapter {
    * 插件内部沿用旧版 qq-group-bot 的扁平消息元素结构，
    * 发送前统一转换为 qq-official-bot 的 { type, data } 结构
    */
-  /** 把 TRSS/插件传入的图文卡片元素规范成 SDK 需要的 { type:"card", data:{ type:"tuwen", content } } */
   normalizeCard(el) {
-    const raw = el?.data ?? el?.card ?? el
-    const content = raw?.content && typeof raw.content === "object" ? raw.content : raw
-    if (!content || typeof content !== "object") return null
-    const title = String(content.title ?? "").trim()
-    const url = String(content.url ?? content.link ?? "").trim()
-    const pic_url = String(content.pic_url ?? content.picUrl ?? content.image ?? "").trim()
-    if (!title || !url || !pic_url) return null
-    return {
-      type: "card",
-      data: {
-        type: "tuwen",
-        content: {
-          title: title.slice(0, 50),
-          description: String(content.description ?? title).trim().slice(0, 200),
-          url,
-          pic_url,
-        },
-      },
-    }
+    return normalizeCard(el)
   }
 
   cardToText(el) {
-    const raw = el?.data ?? el?.card ?? el
-    const content = raw?.content && typeof raw.content === "object" ? raw.content : raw
-    if (!content || typeof content !== "object") return Bot.String(el)
-    return [content.title, content.description, content.url].filter(Boolean).join("\n")
+    return cardToText(el)
   }
 
-  /** 图文卡片只能单独成条（msg_type=8），把卡片从普通消息里拆出来 */
   splitCardMessages(msg) {
-    const list = Array.isArray(msg) ? msg : [msg]
-    const parts = []
-    let batch = []
-    for (const i of list) {
-      if (i && typeof i === "object" && i.type === "card") {
-        if (batch.length) {
-          parts.push(batch)
-          batch = []
-        }
-        parts.push([i])
-      } else batch.push(i)
-    }
-    if (batch.length) parts.push(batch)
-    return parts
+    return splitCardMessages(msg)
   }
 
   toSdkMessage(msg, ctx) {
@@ -313,8 +235,11 @@ const adapter = new (class QQBotAdapter {
           if (ctx && this.isGroupChat(ctx)) id = this.toGroupReferenceId(id, ctx)
           return { type, data: { id, event_id: data.event_id } }
         }
-        case "at":
-          return { type, data: { ...data, user_id: data.user_id ?? data.qq } }
+        case "at": {
+          // QQ 群 @ 的 user_id 是 openid，不能带 "机器人QQ:" 前缀
+          const userId = String(data.user_id ?? data.qq ?? "").replace(/^[^:]+:/, "")
+          return { type, data: { ...data, user_id: userId } }
+        }
         case "card": {
           const card = this.normalizeCard(el)
           return card || { type: "text", data: { text: this.cardToText(el) } }
@@ -1086,13 +1011,41 @@ const adapter = new (class QQBotAdapter {
     )
   }
 
-  sendGroupMsg(data, msg) {
-    return this.sendMsg(
+  /** 群聊 @ 只能走 markdown 消息，把 at 元素合并进 markdown.content */
+  prepareGroupAtMarkdown(msg, data) {
+    if (!this.isGroupChat?.(data)) return msg
+    const list = Array.isArray(msg) ? msg : [msg]
+    if (!list.some(i => i?.type === "at")) return msg
+    // 含富媒体时仍交给 SDK 原有的分发逻辑，避免把图片/文件误塞进 Markdown
+    if (list.some(i => ["image", "record", "video", "file", "card", "ark", "embed"].includes(i?.type))) return msg
+    const parts = []
+    const rest = []
+    for (const i of list) {
+      if (!i || typeof i !== "object") continue
+      if (i.type === "at") {
+        const id = String(i.user_id ?? i.qq ?? "").replace(/^[^:]+:/, "")
+        if (id === "all") parts.push("<qqbot-at-everyone />")
+        else if (id) parts.push(`<qqbot-at-user id="${id}" />`)
+      } else if (i.type === "text") parts.push(String(i.text || ""))
+      else if (i.type === "markdown") parts.push(String(i.data?.content || i.content || ""))
+      else rest.push(i)
+    }
+    if (!parts.length) return msg
+    rest.push({ type: "markdown", data: { content: parts.join("") } })
+    return rest
+  }
+
+  async sendGroupMsg(data, msg) {
+    const groupId = this.rawId(data.group_id)
+    msg = this.prepareGroupAtMarkdown(msg, data)
+    const ret = await this.sendMsg(
       data,
       (msg, source) =>
-        data.bot.sdk.sendGroupMessage(data.group_id, this.toSdkMessage(msg, data), source),
+        data.bot.sdk.sendGroupMessage(groupId, this.toSdkMessage(msg, data), source),
       msg,
     )
+    if (ret && (ret.message_id?.length || ret.data?.length)) this.recordChatOutgoing(data, msg, ret)
+    return ret
   }
 
   async makeGuildMsg(data, msg, nested) {
@@ -1362,8 +1315,9 @@ const adapter = new (class QQBotAdapter {
   }
 
   recallGroupMsg(data, message_id) {
-    Bot.makeLog("info", `撤回群消息：[${data.group_id}] ${message_id}`, data.self_id)
-    return this.recallMsg(data, i => data.bot.sdk.recallGroupMessage(data.group_id, i), message_id)
+    const groupId = this.rawId(data.group_id)
+    Bot.makeLog("info", `撤回群消息：[${groupId}] ${message_id}`, data.self_id)
+    return this.recallMsg(data, i => data.bot.sdk.recallGroupMessage(groupId, i), message_id)
   }
 
   recallDirectMsg(data, message_id, hide = config.hideGuildRecall) {
@@ -1559,8 +1513,9 @@ const adapter = new (class QQBotAdapter {
           t: r.t || now,
           url: r.u,
           md5: r.m,
-          uses: r.s || 1,
+          uses: r.s ?? 0,
           expire: r.x,
+          preview: r.p,
         })
         ;(this.materialMd5[id] ||= new Map()).set(r.m, r.i)
       }
@@ -1578,6 +1533,7 @@ const adapter = new (class QQBotAdapter {
         t: item.t,
         s: item.uses || 0,
         x: item.expire,
+        p: item.preview,
       })
     const file = this.materialFilePath(id)
     try {
@@ -1604,7 +1560,7 @@ const adapter = new (class QQBotAdapter {
     this.materialSaveTimer[id] = timer
   }
 
-  /** 每天清理复用次数=1 的记录；每周只保留复用次数最高的 20 张 */
+  /** 每天清理复用次数=0 的记录；每周只保留复用次数最高的 20 张 */
   async cleanupMaterialRecords(id, kind) {
     const map = this.materials[id]
     if (!map?.size) return
@@ -1620,7 +1576,7 @@ const adapter = new (class QQBotAdapter {
       remove = [...map.keys()].filter(imageId => !keep.has(imageId))
     } else {
       remove = [...map.entries()]
-        .filter(([, item]) => (item.uses || 0) <= 1)
+        .filter(([, item]) => (item.uses || 0) <= 0)
         .map(([imageId]) => imageId)
     }
     for (const imageId of remove) {
@@ -1658,7 +1614,7 @@ const adapter = new (class QQBotAdapter {
 
   /**
    * 素材管理：每次连接机器人都读取一次时间戳，判断是否达到按天/按周清理时间；
-   * 之后每分钟清理超过 1 分钟的素材图（保留复用前 20）。
+   * 之后每分钟清理超过 1 分钟且复用次数=0 的素材图（保留复用前 20）。
    */
   async initMaterialManager(id) {
     this.materials[id] ||= new Map()
@@ -1696,7 +1652,7 @@ const adapter = new (class QQBotAdapter {
   trackMaterial(id, image, md5) {
     if (!image?.image_id) return
     const map = (this.materials[id] ||= new Map())
-    const item = { t: Date.now(), url: image.url, md5, uses: 1 }
+    const item = { t: Date.now(), url: image.url, preview: image.preview_url, md5, uses: 0 }
     if (image.ttl) item.expire = Date.now() + image.ttl * 1000
     map.set(image.image_id, item)
     if (md5) (this.materialMd5[id] ||= new Map()).set(md5, image.image_id)
@@ -1753,7 +1709,7 @@ const adapter = new (class QQBotAdapter {
     }
   }
 
-  /** 每分钟删除 1 分钟前上传的素材图；复用次数最高的 20 张保留 */
+  /** 每分钟删除 1 分钟前上传且复用次数=0 的素材图；复用次数最高的 20 张保留 */
   async cleanupMaterials(id) {
     const map = this.materials[id]
     const now = Date.now()
@@ -1772,6 +1728,8 @@ const adapter = new (class QQBotAdapter {
     for (const [imageId, item] of [...map]) {
       if (keep.has(imageId)) continue
       if (item.t + MATERIAL_TTL > now) continue
+      // 复用次数=0 表示从未被复用，1 分钟后再清；复用过的素材保留
+      if ((item.uses || 0) > 0) continue
       try {
         await sdk.deleteMaterialImage(imageId)
         map.delete(imageId)
@@ -2082,7 +2040,8 @@ const adapter = new (class QQBotAdapter {
       ...data.bot.fl.get(user_id),
       ...event.sender,
       user_id,
-      nickname: event.user_name,
+      nickname: event.user_name || event.author?.username || event.sender?.username || user_id,
+      avatar: event.author?.avatar || event.sender?.avatar || data.sender?.avatar || "",
     }
     Bot.makeLog("info", `好友消息：[${data.user_id}] ${data.raw_message}`, data.self_id)
 
@@ -2115,7 +2074,8 @@ const adapter = new (class QQBotAdapter {
       ...data.bot.fl.get(user_id),
       ...event.sender,
       user_id,
-      nickname: event.user_name,
+      nickname: event.user_name || event.author?.username || event.sender?.username || user_id,
+      avatar: event.author?.avatar || event.sender?.avatar || data.sender?.avatar || "",
     }
     data.group_id = `${data.self_id}${this.sep}${group_id}`
     // 部分群事件会带 group_name，顺便缓存下来，省一次群信息接口
@@ -2145,7 +2105,97 @@ const adapter = new (class QQBotAdapter {
       data.message.unshift({ type: "at", qq: data.self_id })
     await this.setGroupMap(data)
     this.cacheMemberInfo(data, event)
+    this.recordGroupStats(data)
+    this.recordChatIncoming(data)
     return true
+  }
+
+  recordChatIncoming(data) {
+    if (!this.groupChat || !data.group_id || String(data.group_id).startsWith("qg_")) return
+    try {
+      const cached = this.memberCache?.get(data.self_id, data.group_id, data.user_id)
+      const name = data.sender?.nickname || data.sender?.card || cached?.name || data.user_id
+      const avatar = data.sender?.avatar || cached?.avatar || ""
+      const role = data.sender?.member_role || data.sender?.role || cached?.role || ""
+      this.memberCache?.set(data.self_id, data.group_id, data.user_id, { name, avatar, role })
+      this.groupChat.add(data.self_id, data.group_id, {
+        direction: "in",
+        quoted: data.quote_content || data.quote?.content || "",
+        sender: {
+          id: data.user_id,
+          name,
+          avatar,
+          role,
+        },
+        content: normalizeChatContent(data.message),
+        raw: data.raw_message,
+        message_id: data.message_id,
+        time: (Number(data.time) || 0) * 1000 || Date.now(),
+      })
+    } catch {}
+  }
+
+  recordChatOutgoing(data, msg, ret) {
+    if (!this.groupChat || !data?.group_id || String(data.group_id).startsWith("qg_")) return
+    try {
+      const bot = Bot[data.self_id]
+      const groupId = String(data.group_id).includes(this.sep)
+        ? data.group_id
+        : `${data.self_id}${this.sep}${data.group_id}`
+      this.groupChat.add(data.self_id, groupId, {
+        direction: "out",
+        sender: {
+          id: data.self_id,
+          name: bot?.info?.username || bot?.nickname || data.self_id,
+          avatar: bot?.info?.avatar || "",
+          role: "bot",
+        },
+        content: normalizeChatContent(msg),
+        raw: normalizeChatContent(msg).map(i => i.text || "").join(""),
+        message_id: ret?.message_id?.[0] || "",
+        time: Date.now(),
+      })
+    } catch {}
+  }
+
+  /** 记录本地群统计，并在信息过期时异步刷新群资料/机器人权限 */
+  recordGroupStats(data) {
+    if (!this.groupStats) return
+    try {
+      const full = data.group_id
+      const raw = this.rawId(full)
+      this.groupStats.record(data.self_id, {
+        group_id: full,
+        name: data.group_name,
+        text: data.raw_message,
+        time: (Number(data.time) || 0) * 1000 || Date.now(),
+      })
+      if (this.groupStats.infoNeeded(data.self_id, full))
+        this.refreshGroupInfo(data.self_id, raw, full).catch(() => {})
+    } catch {}
+  }
+
+  async refreshGroupInfo(botId, rawGroupId, fullGroupId) {
+    const sdk = Bot[botId]?.sdk
+    if (!sdk?.groupService) return
+    const [info, state] = await Promise.allSettled([
+      sdk.groupService.getInfo(rawGroupId),
+      sdk.groupService.getBotState(rawGroupId),
+    ])
+    const out = {}
+    if (info.status === "fulfilled" && info.value) {
+      const v = info.value
+      out.name = v.group_name
+      out.member_count = v.group_member_num
+      out.avatar = v.group_avatar || v.avatar || v.group_icon || ""
+    }
+    if (state.status === "fulfilled" && state.value) {
+      const v = state.value
+      out.bot_role = v.member_role
+      out.allow_proactive = !!v.allow_proactive_msg
+      out.recv_msg_setting = v.recv_msg_setting
+    }
+    this.groupStats.updateInfo(botId, fullGroupId, out)
   }
 
   /**
@@ -2164,13 +2214,23 @@ const adapter = new (class QQBotAdapter {
       if (!openid) continue
       const user_id = `${data.self_id}${this.sep}${openid}`
       const old = gml.get(user_id) || {}
+      const nickname = m.username || m.nickname || old.nickname
+      const avatar = m.avatar || m.avatar_url || old.avatar
       gml.set(user_id, {
         ...old,
         user_id,
-        nickname: m.username || old.nickname,
+        nickname,
+        avatar,
         member_role: m.member_role || old.member_role,
         bot: m.bot ?? old.bot,
         joined_at: m.joined_at || old.joined_at,
+      })
+      this.memberCache?.set(data.self_id, data.group_id, openid, {
+        name: nickname,
+        avatar,
+        role: m.member_role || old.member_role,
+        bot: m.bot ?? old.bot,
+        joinedAt: m.joined_at || old.joined_at,
       })
     }
   }
@@ -3103,6 +3163,23 @@ const adapter = new (class QQBotAdapter {
     req.res.sendStatus(200)
   }
 
+  async enableWebUIData() {
+    if (!this.webuiEnabled || this.webuiDataEnabled) return this.webuiDataEnabled
+    try {
+      this.groupStats = new GroupStats()
+      await this.groupStats.load()
+      this.groupChat = new GroupChat({ file: path.join("data", "QQBot", "group-chat.json") })
+      await this.groupChat.load()
+      this.memberCache = new MemberCache({ file: path.join("data", "QQBot", "member-cache.json") })
+      await this.memberCache.load()
+      this.webuiDataEnabled = true
+      return true
+    } catch (err) {
+      Bot.makeLog("error", ["QQBot WebUI 数据初始化失败", err], this.id)
+      return false
+    }
+  }
+
   async load() {
     if (Bot.adapter.some(i => i !== adapter && i.id === adapter.id))
       return Bot.makeLog(
@@ -3111,6 +3188,9 @@ const adapter = new (class QQBotAdapter {
       )
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
+    this.webuiEnabled = config.webui?.enabled !== false
+    this.webuiDataEnabled = false
+    if (this.webuiEnabled && (await isWebUIInitialized())) await this.enableWebUIData()
     try {
       this.webui = startWebUI({ adapter, config, configSave, Bot, logger })
     } catch (err) {
