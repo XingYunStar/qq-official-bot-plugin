@@ -163,7 +163,31 @@ export async function pollQrLogin(id) {
   for (const group of list.developers || [])
     for (const item of group.items || []) developers.push({ ...item, group: group.typeName })
   if (!developers.length) return { status: "error", message: "该 QQ 没有可用的开发者主体" }
-  const developer = developers.find(item => item.status === 2) || developers[0]
+  session.developers = developers.map(item => ({
+    id: String(item.id),
+    name: item.name || "",
+    mail: item.regMail || "",
+    type: item.type,
+    group: item.group || "",
+    status: item.status,
+  }))
+  session.nickname = nickname
+  session.status = "developers"
+  return {
+    status: "developers",
+    message: "请选择要登录的开发账号",
+    nickname,
+    developers: session.developers,
+  }
+}
+
+/** 用户选择开发账号后再换取 pskey 登录态 */
+export async function selectDeveloper(id, developerId) {
+  const session = sessions.get(id)
+  if (!session) throw new Error("二维码会话不存在或已过期")
+  if (!session.developers?.length) throw new Error("请先完成扫码登录")
+  const developer = session.developers.find(item => String(item.id) === String(developerId))
+  if (!developer) throw new Error("开发账号不存在")
   session.jar.cookies.push({
     name: "developer_id_lite",
     value: String(developer.id),
@@ -182,8 +206,8 @@ export async function pollQrLogin(id) {
   return {
     status: "success",
     message: "登录成功",
-    nickname,
-    developer: { id: developer.id, name: developer.name, mail: developer.regMail },
+    nickname: session.nickname || "",
+    developer,
     cookie,
   }
 }

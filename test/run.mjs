@@ -108,7 +108,8 @@ SdkBot.prototype.getSelfInfo = async function () {
 }
 
 nodeModule.register(new URL("./hooks.mjs", import.meta.url).href)
-const { parseTokenLine, formatTokenLine } = await import("../index.js")
+const { parseTokenLine, formatTokenLine } = await import("../components/token.js")
+await import("../index.js")
 
 const adapter = Bot.adapter[0]
 let pass = 0,
@@ -905,8 +906,8 @@ console.log("\n=== T. 素材图生命周期 ===")
     })
   await adapter.cleanupMaterials(id)
   assert(
-    "清理 1 分钟前上传的素材（保留复用最高的 20 张）",
-    deleted.length === 5 && deleted.includes("old-0") && !deleted.includes("old-24"),
+    "清理 1 分钟前未复用的素材（复用过的保留）",
+    deleted.length === 1 && deleted.includes("old-0") && !deleted.includes("old-24"),
     JSON.stringify(deleted),
   )
   adapter.materials[id].clear()
@@ -972,8 +973,8 @@ console.log("\n=== U. 素材复用缓存 ===")
   const b = await adapter.makeBotImage(png)
   assert("相同图片复用素材", uploads === 1 && a.url === b.url, JSON.stringify({ uploads, a, b }))
   assert(
-    "复用次数累加",
-    adapter.materials[id].get("imgA").uses === 2,
+    "首次上传复用次数为 0，第二次复用为 1",
+    adapter.materials[id].get("imgA").uses === 1,
     String(adapter.materials[id].get("imgA")?.uses),
   )
 
@@ -990,8 +991,8 @@ console.log("\n=== U. 素材复用缓存 ===")
   bot.sdk.deleteMaterialImage = async imageId => deleted.push(imageId)
   await adapter.cleanupMaterials(id)
   assert(
-    "复用最高的 20 张保留",
-    deleted.length === 5 && !deleted.includes("img24") && deleted.includes("img0"),
+    "复用最高的 20 张保留，未复用的才清理",
+    deleted.length === 1 && !deleted.includes("img24") && deleted.includes("img0"),
     JSON.stringify(deleted),
   )
 
@@ -1012,7 +1013,7 @@ console.log("\n=== V. 素材记录持久化/按天按周清理 ===")
 
   adapter.materials[id] = new Map([
     ["pimg", { t: Date.now(), url: "qqbot-media://p", md5: "pmd5", uses: 3, expire: Date.now() + 100000 }],
-    ["cold", { t: Date.now(), url: "qqbot-media://c", md5: "cmd5", uses: 1, expire: Date.now() + 100000 }],
+    ["cold", { t: Date.now(), url: "qqbot-media://c", md5: "cmd5", uses: 0, expire: Date.now() + 100000 }],
   ])
   adapter.materialMd5[id] = new Map([
     ["pmd5", "pimg"],
@@ -1038,7 +1039,7 @@ console.log("\n=== V. 素材记录持久化/按天按周清理 ===")
   deleted.length = 0
   await adapter.checkMaterialRecords(id)
   assert(
-    "每天清理复用次数=1",
+    "每天清理复用次数=0",
     !adapter.materials[id].has("cold") &&
       adapter.materials[id].has("pimg") &&
       deleted.includes("cold"),
@@ -1083,7 +1084,7 @@ console.log("\n=== W. 连接时按时间戳清理 ===")
   clearInterval(adapter.materialTimer[id])
   delete adapter.materialTimer[id]
   adapter.materials[id] = new Map([
-    ["stale", { t: Date.now(), url: "u", md5: "m", uses: 1, expire: Date.now() + 100000 }],
+    ["stale", { t: Date.now(), url: "u", md5: "m", uses: 0, expire: Date.now() + 100000 }],
   ])
   adapter.materialMd5[id] = new Map([["m", "stale"]])
   adapter.materialMeta[id] = {
@@ -1217,12 +1218,68 @@ console.log("\n=== I. 冲突保护 / 退出 ===")
   assert("logout 停止 token 刷新", !adapter.token["10001"])
 }
 
+console.log("\n=== AB. 本地群统计 ===")
+{
+  const { GroupStats, isCommandText, dayKey } = await import("../components/group-stats.js")
+  const file = "/tmp/qqbot-group-stats-test.json"
+  await fs.rm(file, { force: true })
+  const stats = await new GroupStats(file).load()
+  stats.record("bot1", { group_id: "bot1:g1", name: "测试群", text: "#菜单", time: Date.now() })
+  stats.record("bot1", { group_id: "bot1:g1", name: "测试群", text: "普通聊天", time: Date.now() })
+  stats.record("bot1", { group_id: "bot1:g1", name: "测试群", text: "<@!bot> #状态", time: Date.now() })
+  stats.updateInfo("bot1", "bot1:g1", {
+    member_count: 42,
+    bot_role: "admin",
+    allow_proactive: true,
+    recv_msg_setting: "all",
+  })
+  const sum = stats.summary("bot1")
+  assert("群统计：指令数", stats.get("bot1", "bot1:g1").commands === 2, JSON.stringify(stats.get("bot1", "bot1:g1")))
+  assert("群统计：群汇总", sum.groups === 1 && sum.members === 42 && sum.commandsToday === 2, JSON.stringify(sum))
+  assert("群统计：能力字段", stats.get("bot1", "bot1:g1").bot_role === "admin" && stats.get("bot1", "bot1:g1").allow_proactive === true)
+  assert("群统计：命令识别", isCommandText("#菜单") && isCommandText("<@!x> /状态") && !isCommandText("普通聊天"))
+  await stats.flush()
+  const loaded = await new GroupStats(file).load()
+  assert("群统计：持久化", loaded.get("bot1", "bot1:g1")?.commands === 2)
+  await fs.rm(file, { force: true })
+  assert("群统计：日期键", /^\d{8}$/.test(dayKey()))
+}
+
+console.log("\n=== AC. 群聊缓存与富媒体 ===")
+{
+  const { GroupChat, normalizeChatContent } = await import("../components/group-chat.js")
+  const chat = new GroupChat(2)
+  chat.add("bot", "g", { direction: "in", sender: { name: "A" }, content: [{ type: "text", text: "hi" }] })
+  const out = chat.add("bot", "g", { direction: "out", sender: { name: "bot" }, content: [{ type: "text", text: "hello" }] })
+  chat.add("bot", "g", { direction: "in", sender: { name: "B" }, content: [{ type: "text", text: "third" }] })
+  const list = chat.list("bot", "g", 10)
+  assert("群聊：只保留最近 N 条", list.length === 2 && list[1].direction === "in", JSON.stringify(list.map(i => i.direction)))
+  assert("群聊：since 游标", chat.list("bot", "g", 10, out.id).length === 1)
+  chat.add("bot", "g", { direction: "in", sender: { name: "old" }, content: [{ type: "text", text: "old" }], time: Date.now() - 25 * 60 * 60 * 1000 })
+  assert("群聊：只保留 24 小时", !chat.list("bot", "g", 10).some(i => i.content?.[0]?.text === "old"))
+  const media = normalizeChatContent([{ type: "image", file: Buffer.from([1, 2, 3]) }, { type: "record", url: "https://x/a.mp3" }])
+  assert("群聊：Buffer 图片转 data URL", media[0].url.startsWith("data:image/") && media[1].url === "https://x/a.mp3")
+  const file = "/tmp/qqbot-group-chat-test.json"
+  await fs.rm(file, { force: true })
+  const persisted = new GroupChat({ file, limit: 5 })
+  persisted.add("bot", "g1", { direction: "in", sender: { id: "u1", name: "A" }, content: [{ type: "text", text: "persist" }] })
+  await persisted.flush()
+  const reloaded = await new GroupChat({ file, limit: 5 }).load()
+  assert("群聊：24 小时记录落盘", reloaded.list("bot", "g1", 10)[0]?.content?.[0]?.text === "persist")
+  await fs.rm(file, { force: true })
+}
+
 console.log("\n=== AA. QQ 扫码登录流程（模拟上游） ===")
 {
-  const qqlogin = await import("../webui/qqlogin.js")
+  const qqlogin = await import("../components/qqlogin.js")
   const oldFetch = globalThis.fetch
   globalThis.fetch = async url => {
     const u = String(url)
+    if (u.includes("/lite/create_session"))
+      return new Response(JSON.stringify({ data: { session_id: "s1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
     if (u.includes("ptqrshow"))
       return new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47]), {
         status: 200,
@@ -1233,12 +1290,18 @@ console.log("\n=== AA. QQ 扫码登录流程（模拟上游） ===")
         "ptuiCB('0','0','https://q.qq.com/h5/ptlogin-callback.html?x=1','0','登录成功','nick')",
         { status: 200 },
       )
-    if (u.includes("ptlogin-callback"))
+    if (u.includes("developer_list"))
+      return new Response(
+        JSON.stringify({ res: { ret: 0 }, developers: [{ items: [{ id: "dev1", name: "流萤", status: 2 }] }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )
+    if (u.includes("pskey_login"))
       return new Response("ok", {
         status: 200,
         headers: [
-          ["set-cookie", "uin=o123; Domain=.qq.com; Path=/"],
-          ["set-cookie", "skey=xyz; Domain=.qq.com; Path=/"],
+          ["set-cookie", "qlogin_uid=uid123; Domain=.qq.com; Path=/"],
+          ["set-cookie", "qticket=ticket123; Domain=.qq.com; Path=/"],
+          ["set-cookie", "b-token=btoken123; Domain=.qq.com; Path=/"],
         ],
       })
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
@@ -1248,9 +1311,18 @@ console.log("\n=== AA. QQ 扫码登录流程（模拟上游） ===")
     assert("生成二维码", qr.image.startsWith("data:image/png;base64,"), qr.image.slice(0, 30))
     const st = await qqlogin.pollQrLogin(qr.id)
     assert(
-      "扫码成功并保存 Cookie",
-      st.status === "success" && st.cookie.includes("uin=o123") && st.cookie.includes("skey=xyz"),
+      "扫码后返回开发账号列表",
+      st.status === "developers" && st.developers?.[0]?.id === "dev1",
       JSON.stringify(st).slice(0, 200),
+    )
+    const done = await qqlogin.selectDeveloper(qr.id, "dev1")
+    assert(
+      "选择开发账号后保存完整 Cookie",
+      done.status === "success" &&
+        done.cookie.includes("qlogin_uid=uid123") &&
+        done.cookie.includes("qticket=ticket123") &&
+        done.developer?.id === "dev1",
+      JSON.stringify(done).slice(0, 200),
     )
   } finally {
     globalThis.fetch = oldFetch

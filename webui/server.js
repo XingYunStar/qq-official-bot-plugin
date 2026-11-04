@@ -7,13 +7,17 @@ import http from "node:http"
 import fs from "node:fs/promises"
 import path from "node:path"
 import crypto from "node:crypto"
+import os from "node:os"
+import { execFile as execFileCb } from "node:child_process"
+import { promisify, format as formatUtil } from "node:util"
 import YAML from "yaml"
 import axios from "axios"
-import { startQrLogin, pollQrLogin } from "./qqlogin.js"
+import { startQrLogin, pollQrLogin, selectDeveloper } from "../components/qqlogin.js"
+import { fetchStats } from "../model/stats.js"
+import { dayKey } from "../components/group-stats.js"
 
 const DATA_DIR = path.join("data", "QQBot")
 const AUTH_FILE = path.join(DATA_DIR, "webui.json")
-const STATS_API = "https://bot.q.qq.com/cgi-bin/v2/datareport/query"
 
 let running = null
 let passwordRevealAt = 0
@@ -29,7 +33,7 @@ const readBody = req =>
     let data = ""
     req.on("data", chunk => {
       data += chunk
-      if (data.length > 10 * 1024 * 1024) reject(new Error("body too large"))
+      if (data.length > 25 * 1024 * 1024) reject(new Error("body too large"))
     })
     req.on("end", () => resolve(data))
     req.on("error", reject)
@@ -42,23 +46,33 @@ function randomPassword() {
   return out
 }
 
+export async function isWebUIInitialized() {
+  try {
+    const data = JSON.parse(await fs.readFile(AUTH_FILE, "utf8"))
+    return !!(data.password && data.secret && data.initialized)
+  } catch { return false }
+}
+
 async function loadAuth() {
   try {
     const data = JSON.parse(await fs.readFile(AUTH_FILE, "utf8"))
-    if (data.password && data.secret) return data
+    if (data.password && data.secret) {
+      if (typeof data.initialized !== "boolean") data.initialized = false
+      return data
+    }
   } catch {}
-  const data = {
+  // 首次未登录前不落盘：只有真正登录/设置密码后才创建 webui.json
+  return {
     password: process.env.QQBOT_WEBUI_PASSWORD || randomPassword(),
     secret: crypto.randomBytes(24).toString("hex"),
+    initialized: false,
     qqCookie: "",
     qqCookieAt: 0,
   }
-  await fs.mkdir(DATA_DIR, { recursive: true })
-  await fs.writeFile(AUTH_FILE, JSON.stringify(data, null, 2), { mode: 0o600 })
-  return data
 }
 
 async function saveAuth(auth) {
+  await fs.mkdir(DATA_DIR, { recursive: true })
   await fs.writeFile(AUTH_FILE, JSON.stringify(auth, null, 2), { mode: 0o600 })
 }
 
@@ -86,60 +100,361 @@ async function configFiles() {
   return [...files]
 }
 
-const statsRange = { "7d": 0, "14d": 1, "30d": 2 }
+const qqGroupCache = new Map()
+const chatMediaCache = new Map()
+const chatMembersResponseCache = new Map()
+let sharpModule
+async function chatThumbnail(buffer, type) {
+  if (!/^image\/(jpeg|png|webp|bmp)$/i.test(type || "")) return { data: buffer, type }
+  if (buffer.length < 180 * 1024) return { data: buffer, type }
+  try {
+    sharpModule ||= (await import("sharp")).default
+    const image = sharpModule(buffer, { failOn: "none" })
+    const meta = await image.metadata()
+    if ((meta.width || 0) <= 1400 && (meta.height || 0) <= 1400 && buffer.length < 1.2 * 1024 * 1024)
+      return { data: buffer, type }
+    const data = await image
+      .rotate()
+      .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer()
+    return { data, type: "image/webp" }
+  } catch {
+    return { data: buffer, type }
+  }
+}
+async function fetchQQGroups(appid, cookie) {
+  if (!appid || !cookie) return []
+  const key = String(appid)
+  const cached = qqGroupCache.get(key)
+  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.groups
+  const groups = []
+  let paging = ""
+  try {
+    for (let page = 0; page < 30; page++) {
+      const { data } = await axios.post(
+        "https://bot.q.qq.com/cgi-bin/v2/bot_scope_manager/bot_group_list/query",
+        { bot_appid: Number(appid), paging_cookie: paging, page_size: 100 },
+        { headers: { Cookie: cookie, "Content-Type": "application/json" }, timeout: 15000 },
+      )
+      if (data?.retcode !== 0) break
+      const d = data.data || {}
+      for (const g of d.groups || [])
+        if (g.group_id) groups.push({ group_id: String(g.group_id), name: g.group_name || "", in_group: !!g.in_group })
+      paging = d.next_paging_cookie || ""
+      if (!d.has_more || !paging) break
+    }
+  } catch {}
+  qqGroupCache.set(key, { at: Date.now(), groups })
+  return groups
+}
+const groupAvatarFile = path.join("data", "QQBot", "group-avatar-cache.json")
+let groupAvatarMatches = null
+let groupAvatarSaveTimer = null
+async function loadGroupAvatarCache() {
+  if (groupAvatarMatches) return groupAvatarMatches
+  try { groupAvatarMatches = JSON.parse(await fs.readFile(groupAvatarFile, "utf8")) } catch { groupAvatarMatches = {} }
+  return groupAvatarMatches
+}
+function saveGroupAvatarCache() {
+  if (groupAvatarSaveTimer) return
+  groupAvatarSaveTimer = setTimeout(async () => {
+    groupAvatarSaveTimer = null
+    try {
+      await fs.mkdir(path.dirname(groupAvatarFile), { recursive: true })
+      const tmp = `${groupAvatarFile}.tmp`
+      await fs.writeFile(tmp, JSON.stringify(groupAvatarMatches || {}))
+      await fs.rename(tmp, groupAvatarFile)
+    } catch {}
+  }, 1500)
+  groupAvatarSaveTimer.unref?.()
+}
+function oneBotGroupIndex() {
+  const found = new Map()
+  const ambiguous = new Set()
+  for (const bot of Object.values(globalThis.Bot || {})) {
+    if (!bot || !bot.gl) continue
+    const values = typeof bot.gl.values === "function" ? bot.gl.values() : Object.values(bot.gl)
+    for (const g of values) {
+      const groupId = String(g?.group_id || "")
+      const name = String(g?.group_name || g?.name || "").trim()
+      if (!/^\d+$/.test(groupId) || !name) continue
+      const old = found.get(name)
+      if (old && old.group_id !== groupId) { ambiguous.add(name); continue }
+      if (!old) found.set(name, { group_id: groupId, source: "onebot" })
+    }
+  }
+  for (const name of ambiguous) found.delete(name)
+  return found
+}
+async function resolveGroupAvatarMatch(groupKey, name, qqByName, oneBotCache = null) {
+  name = String(name || "").trim()
+  if (!groupKey) return ""
+  const cache = await loadGroupAvatarCache()
+  const old = cache[groupKey]
+  if (old && Date.now() - (old.at || 0) < 5 * 60 * 1000) return groupAvatar(old.group_id)
+  if (name) {
+    const oneBot = (oneBotCache || oneBotGroupIndex()).get(name)
+    const hit = oneBot || qqByName.get(name)
+    if (hit) {
+      cache[groupKey] = { group_id: hit.group_id, name, at: Date.now(), source: hit.source || "qq" }
+      saveGroupAvatarCache()
+      return groupAvatar(hit.group_id)
+    }
+  }
+  // 没有拿到新数据时保留旧缓存，不因为超过 5 分钟就丢弃
+  return old ? groupAvatar(old.group_id) : ""
+}
 
-function mapDaily(row) {
+const avatarCache = new Map()
+function groupAvatar(groupId) {
+  return groupId ? `/api/group/avatar?group=${encodeURIComponent(groupId)}` : ""
+}
+
+const execFile = promisify(execFileCb)
+let sysPrev = { cpu: null, net: null, at: 0 }
+function cpuSnapshot() {
+  let idle = 0, total = 0
+  for (const c of os.cpus()) {
+    idle += c.times.idle
+    total += Object.values(c.times).reduce((a, b) => a + b, 0)
+  }
+  return { idle, total }
+}
+async function systemInfo(Bot) {
+  const now = Date.now()
+  const cpu = cpuSnapshot()
+  let cpuUsage = 0
+  if (sysPrev.cpu) {
+    const dIdle = cpu.idle - sysPrev.cpu.idle
+    const dTotal = cpu.total - sysPrev.cpu.total
+    if (dTotal > 0) cpuUsage = Math.max(0, Math.min(100, (1 - dIdle / dTotal) * 100))
+  }
+  sysPrev.cpu = cpu
+  let swapTotal = 0, swapFree = 0
+  try {
+    const meminfo = await fs.readFile("/proc/meminfo", "utf8")
+    const pick = k => Number((meminfo.match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) || [])[1] || 0) * 1024
+    swapTotal = pick("SwapTotal")
+    swapFree = pick("SwapFree")
+  } catch {}
+  let disk = null
+  try {
+    const st = await fs.statfs("/")
+    const total = Number(st.blocks) * Number(st.bsize)
+    const free = Number(st.bavail) * Number(st.bsize)
+    disk = { total, free, used: Math.max(0, total - free), percent: total ? (1 - free / total) * 100 : 0 }
+  } catch {}
+  let net = { rx: 0, tx: 0, rxRate: 0, txRate: 0 }
+  try {
+    const raw = await fs.readFile("/proc/net/dev", "utf8")
+    let rx = 0, tx = 0
+    for (const line of raw.split("\n").slice(2)) {
+      const [name, data] = line.split(":")
+      if (!name || !data || name.trim() === "lo") continue
+      const parts = data.trim().split(/\s+/).map(Number)
+      rx += parts[0] || 0
+      tx += parts[8] || 0
+    }
+    const dt = sysPrev.net ? Math.max(0.2, (now - sysPrev.at) / 1000) : 1
+    net = {
+      rx, tx,
+      rxRate: sysPrev.net ? Math.max(0, (rx - sysPrev.net.rx) / dt) : 0,
+      txRate: sysPrev.net ? Math.max(0, (tx - sysPrev.net.tx) / dt) : 0,
+    }
+    sysPrev.net = { rx, tx }
+    sysPrev.at = now
+  } catch {}
+  const interfaces = []
+  for (const [name, list] of Object.entries(os.networkInterfaces()))
+    for (const i of list || [])
+      if (i.family === "IPv4" && !i.internal) interfaces.push({ name, address: i.address, mac: i.mac })
+  let gpu = []
+  try {
+    const { stdout } = await execFile(
+      "nvidia-smi",
+      ["--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"],
+      { timeout: 2000 },
+    )
+    gpu = stdout.trim().split("\n").filter(Boolean).map(line => {
+      const [name, util, used, total, temp] = line.split(",").map(s => s.trim())
+      return { name, util: Number(util) || 0, memoryUsed: Number(used) || 0, memoryTotal: Number(total) || 0, temperature: Number(temp) || 0 }
+    })
+  } catch {}
+  const memTotal = os.totalmem(), memFree = os.freemem()
+  const proc = process.memoryUsage()
+  const bots = Object.values(Bot).filter(b => b?.adapter && b?.sdk).length
   return {
-    date: String(row.report_date),
-    activeUsers: +(row.active_user_cnt || 0),
-    activeGroups: +(row.active_group_cnt || 0),
-    activeGuilds: +(row.active_guild_cnt || 0),
-    messages: +(row.up_msg?.total || 0),
-    c2c: +(row.up_msg?.c2c || 0),
-    group: +(row.up_msg?.group || 0),
-    friends: +(row.friends?.stock_cnt || 0),
-    friendsAdd: +(row.friends?.add_cnt || 0),
-    friendsRemove: +(row.friends?.remove_cnt || 0),
-    groups: +(row.groups?.stock_cnt || 0),
-    groupsAdd: +(row.groups?.add_cnt || 0),
-    groupsRemove: +(row.groups?.remove_cnt || 0),
-    guilds: +(row.guilds?.stock_cnt || 0),
-    newUsers: +(row.new_user_cnt || 0),
-    replyCount: +(row.reply_cnt || 0),
-    replyRate: +(row.reply_rate || 0),
-    avgResponse: +(row.avg_response_time || 0),
+    host: os.hostname(),
+    platform: `${os.platform()} ${os.release()} ${os.arch()}`,
+    uptime: os.uptime(),
+    load: os.loadavg(),
+    cpu: { model: os.cpus()[0]?.model || "", cores: os.cpus().length, usage: +cpuUsage.toFixed(1) },
+    memory: { total: memTotal, free: memFree, used: memTotal - memFree, percent: memTotal ? (1 - memFree / memTotal) * 100 : 0 },
+    swap: { total: swapTotal, free: swapFree, used: swapTotal - swapFree, percent: swapTotal ? (1 - swapFree / swapTotal) * 100 : 0 },
+    disk,
+    network: { ...net, interfaces },
+    gpu,
+    node: { version: process.version, rss: proc.rss, heapUsed: proc.heapUsed, heapTotal: proc.heapTotal },
+    bots,
   }
 }
 
-function summarize(rows) {
-  const sum = key => rows.reduce((n, r) => n + (r[key] || 0), 0)
-  const last = rows[rows.length - 1] || {}
-  return {
-    days: rows.length,
-    activeUsers: sum("activeUsers"),
-    messages: sum("messages"),
-    c2c: sum("c2c"),
-    group: sum("group"),
-    newUsers: sum("newUsers"),
-    replyCount: sum("replyCount"),
-    friends: last.friends || 0,
-    groups: last.groups || 0,
-    guilds: last.guilds || 0,
-    avgActiveUsers: rows.length ? Math.round(sum("activeUsers") / rows.length) : 0,
-    avgMessages: rows.length ? Math.round(sum("messages") / rows.length) : 0,
-    replyRate: rows.length ? +(sum("replyCount") / Math.max(1, sum("messages")) * 100).toFixed(2) : 0,
+function lookupGroupName(botId, fullId) {
+  try {
+    const byStats = adapterGroupStatsName(botId, fullId)
+    if (byStats) return byStats
+    const bot = globalThis.Bot?.[botId]
+    const hit = bot?.gl?.get?.(fullId)
+    return hit?.group_name || hit?.name || ""
+  } catch { return "" }
+}
+function lookupMemberName(botId, groupFull, userFull) {
+  try {
+    const bot = globalThis.Bot?.[botId]
+    const m = bot?.gml?.get?.(groupFull)?.get?.(userFull)
+    if (m?.nickname || m?.username) return m.nickname || m.username
+    const fromChat = globalThis.__qqbotChatMembers?.(botId, groupFull)?.find(x => `${botId}:${x.member_openid}` === userFull)
+    return fromChat?.username || fromChat?.nickname || ""
+  } catch { return "" }
+}
+function adapterGroupStatsName(botId, fullId) {
+  try {
+    const stats = globalThis.__qqbotGroupStats?.(botId)
+    return stats?.get?.(botId, fullId)?.name || ""
+  } catch { return "" }
+}
+function humanizeLogLine(line) {
+  if (typeof line !== "string") return line
+  let out = line.replace(/\[(\d+):([A-Za-z0-9_-]{8,}), (\d+):([A-Za-z0-9_-]{8,})\]/g, (m, b1, g1, b2, u2) => {
+    const groupFull = `${b1}:${g1}`
+    const userFull = `${b2}:${u2}`
+    const gname = lookupGroupName(b1, groupFull)
+    const uname = lookupMemberName(b2, groupFull, userFull)
+    return `[${g1}${gname ? `(${gname})` : ""}, ${u2}${uname ? `(${uname})` : ""}]`
+  })
+  out = out.replace(/\b(\d+):([A-Fa-f0-9]{16,})\b/g, (m, botId, id) => {
+    if (out.includes(`${id}(`)) return m
+    const name = lookupGroupName(botId, `${botId}:${id}`)
+    return name ? `${id}(${name})` : m
+  })
+  return out
+}
+
+const liveLog = (globalThis.__qqbotLiveLog ||= { entries: [], clients: new Map(), seq: 0, timer: null })
+if (!Array.isArray(liveLog.entries)) liveLog.entries = []
+if (!(liveLog.clients instanceof Map)) liveLog.clients = new Map()
+if (!liveLog.seq) liveLog.seq = 0
+const LIVE_LOG_MAX = 3000
+const LIVE_LOG_BATCH = 250
+const LOG_RANK = { trace: 0, debug: 1, info: 2, mark: 2, warn: 3, error: 4, fatal: 5 }
+const LIVE_LEVEL = { all: 0, debug: 1, info: 2, warn: 3, error: 4 }
+function stripAnsi(text) {
+  return String(text).replace(/\x1b\[[0-9;]*m/g, "")
+}
+function scheduleLiveFlush() {
+  if (liveLog.timer) return
+  liveLog.timer = setTimeout(flushLive, 220)
+  liveLog.timer.unref?.()
+}
+function flushLive() {
+  liveLog.timer = null
+  if (!liveLog.clients.size) return
+  for (const client of liveLog.clients.values()) {
+    const fresh = liveLog.entries.filter(e => e.id > client.lastId && e.rank >= client.rank)
+    const send = fresh.slice(-LIVE_LOG_BATCH)
+    const dropped = Math.max(0, fresh.length - send.length)
+    const lines = send.map(e => humanizeLogLine(e.line))
+    if (dropped) lines.push(`[实时日志] 处理不过来，已省略 ${dropped} 条低优先级/高频日志`)
+    if (lines.length) {
+      try { if (!client.res.writableEnded) client.res.write(`data: ${JSON.stringify({ lines })}\n\n`) } catch {}
+    }
+    if (liveLog.entries.length) client.lastId = liveLog.entries[liveLog.entries.length - 1].id
   }
+}
+function captureLog(level, args) {
+  let text
+  try { text = args.length ? formatUtil(...args) : "" }
+  catch { text = args.map(a => String(a)).join(" ") }
+  text = stripAnsi(text)
+  const time = new Date().toLocaleTimeString("zh-CN", { hour12: false })
+  const line = `[${time}][${level.toUpperCase()}] ${text}`
+  liveLog.entries.push({ id: ++liveLog.seq, line, rank: LOG_RANK[level] ?? 2 })
+  if (liveLog.entries.length > LIVE_LOG_MAX) liveLog.entries.splice(0, liveLog.entries.length - LIVE_LOG_MAX)
+  if (liveLog.clients.size) scheduleLiveFlush()
+}
+function installLiveLog(logger) {
+  if (!logger || logger.__qqbotLiveHooked) return
+  const levels = ["trace", "debug", "info", "mark", "warn", "error", "fatal"]
+  for (const level of levels) {
+    if (typeof logger[level] !== "function") continue
+    const original = logger[level]
+    try {
+      logger[level] = function (...args) {
+        captureLog(level, args)
+        return original.apply(this, args)
+      }
+    } catch (err) {
+      try { console.error("[QQBot] 实时日志 hook 失败", level, err.message) } catch {}
+    }
+  }
+  try { logger.__qqbotLiveHooked = true } catch {}
+}
+
+function logPasswordBanner(logger, password) {
+  const line = "━".repeat(52)
+  logger.info("")
+  logger.info(logger.magenta(line))
+  logger.info(logger.magenta("  🔐  QQBot WebUI 登录密码"))
+  const pass = typeof logger.bold === "function" ? logger.bold(password) : password
+  logger.info(logger.magenta(`  ${pass}`))
+  logger.info(logger.magenta("  复制上面的密码登录，30 秒内可再次打印"))
+  logger.info(logger.magenta(line))
+  logger.info("")
 }
 
 export function startWebUI({ adapter, config, configSave, Bot, logger }) {
   if (running) return running
   const settings = config.webui || {}
   if (settings.enabled === false) return null
+  installLiveLog(logger)
   const port = Number(settings.port) || 2580
   const host = settings.host || "0.0.0.0"
 
+  globalThis.__qqbotGroupStats = id => adapter.groupStats
+  globalThis.__qqbotChatMembers = (id, group) => adapter.groupChat?.members?.(id, group) || []
   const auth = loadAuth()
   const htmlFile = path.join(import.meta.dirname, "index.html")
+
+  const configuredAppids = () => {
+    const ids = new Set()
+    for (const bot of Object.values(Bot)) {
+      if (!bot || bot.adapter !== adapter) continue
+      if (bot.info?.appid) ids.add(String(bot.info.appid))
+    }
+    for (const line of config.token || []) {
+      const parts = String(line).split(":")
+      if (parts[1]) ids.add(parts[1])
+    }
+    return [...ids]
+  }
+  let collectTimer = null
+  let collecting = false
+  const collectStats = async () => {
+    if (collecting) return
+    collecting = true
+    try {
+      const authData = await auth
+      if (!authData.initialized || !authData.qqCookie) return
+      for (const appid of configuredAppids()) {
+        try { await fetchStats({ appid, range: "30d", cookie: authData.qqCookie }) } catch {}
+      }
+    } finally { collecting = false }
+  }
+  const statsCollectorTimer = setInterval(collectStats, 6 * 60 * 60 * 1000)
+  statsCollectorTimer.unref?.()
+  const statsCollectorStart = setTimeout(collectStats, 30000)
+  statsCollectorStart.unref?.()
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -152,8 +467,47 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         return res.end(html)
       }
 
+      if (pathname.startsWith("/vendor/")) {
+        const rel = pathname.slice("/vendor/".length)
+        if (!rel || rel.includes("..")) return json(res, 404, { error: "not found" })
+        const file = path.resolve(import.meta.dirname, "vendor", rel)
+        const root = path.resolve(import.meta.dirname, "vendor")
+        if (!file.startsWith(root + path.sep)) return json(res, 404, { error: "not found" })
+        try {
+          const data = await fs.readFile(file)
+          const ext = path.extname(file).toLowerCase()
+          const types = { ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf" }
+          res.writeHead(200, { "Content-Type": types[ext] || "application/octet-stream", "Cache-Control": "public, max-age=86400" })
+          return res.end(data)
+        } catch {
+          return json(res, 404, { error: "not found" })
+        }
+      }
+
+      if (pathname === "/assets/qqbot.svg") {
+        const svg = await fs.readFile(path.join(import.meta.dirname, "assets", "qqbot.svg"))
+        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" })
+        return res.end(svg)
+      }
+
+      if (pathname === "/style.css" || pathname === "/app.js") {
+        const file = pathname === "/style.css" ? "style.css" : "app.js"
+        const content = await fs.readFile(path.join(import.meta.dirname, file))
+        res.writeHead(200, {
+          "Content-Type": pathname === "/style.css" ? "text/css; charset=utf-8" : "application/javascript; charset=utf-8",
+          "Cache-Control": "no-cache",
+        })
+        return res.end(content)
+      }
+
+      if (pathname === "/api/bootstrap" && req.method === "GET") {
+        const authData = await auth
+        return json(res, 200, { initialized: !!authData.initialized })
+      }
+
       if (pathname === "/api/password" && req.method === "POST") {
         const authData = await auth
+        if (authData.initialized) return json(res, 400, { error: "密码已设置，不再打印初始密码" })
         const now = Date.now()
         if (now < passwordRevealAt)
           return json(res, 429, {
@@ -161,7 +515,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             wait: Math.ceil((passwordRevealAt - now) / 1000),
           })
         passwordRevealAt = now + 30000
-        logger.info(logger.magenta(`[QQBot WebUI] 登录密码：${authData.password}`))
+        logPasswordBanner(logger, authData.password)
         logger.info(logger.magenta(`[QQBot WebUI] 密码文件：${path.resolve(AUTH_FILE)}`))
         return json(res, 200, { ok: true, cooldown: 30, message: "密码已打印到 TRSS 日志" })
       }
@@ -171,6 +525,30 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const authData = await auth
         if (String(body.password || "") !== authData.password)
           return json(res, 401, { error: "密码错误" })
+        await saveAuth(authData)
+        res.setHeader(
+          "Set-Cookie",
+          `qqbot_webui=${tokenOf(authData)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+        )
+        if (authData.initialized) Promise.resolve(adapter.enableWebUIData?.()).catch(() => {})
+        return json(res, 200, { ok: true, mustChangePassword: !authData.initialized })
+      }
+
+      const authData = await auth
+      const token = parseCookies(req).qqbot_webui
+      if (!token || token !== tokenOf(authData)) return json(res, 401, { error: "未登录" })
+
+      if (pathname === "/api/change-password" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        const password = String(body.password || "")
+        const confirm = String(body.confirm || "")
+        if (password.length < 8) return json(res, 400, { error: "密码至少 8 位" })
+        if (password.length > 64) return json(res, 400, { error: "密码最多 64 位" })
+        if (password !== confirm) return json(res, 400, { error: "两次输入的密码不一致" })
+        authData.password = password
+        authData.initialized = true
+        await saveAuth(authData)
+        try { await adapter.enableWebUIData?.() } catch {}
         res.setHeader(
           "Set-Cookie",
           `qqbot_webui=${tokenOf(authData)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
@@ -178,9 +556,8 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         return json(res, 200, { ok: true })
       }
 
-      const authData = await auth
-      const token = parseCookies(req).qqbot_webui
-      if (!token || token !== tokenOf(authData)) return json(res, 401, { error: "未登录" })
+      if (!authData.initialized)
+        return json(res, 403, { error: "请先设置 WebUI 密码", code: "PASSWORD_SETUP_REQUIRED" })
 
       // ---- status ----
       if (pathname === "/api/status") {
@@ -190,6 +567,8 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           bots.push({
             id,
             appid: bot.info?.appid || "",
+            name: bot.info?.username || bot.info?.nickname || bot.nickname || id,
+            avatar: bot.info?.avatar || "",
             online: !!bot.sdk,
             webhook: !!adapter.appid[bot.info?.appid],
           })
@@ -199,6 +578,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           port,
           bots,
           authFile: AUTH_FILE,
+          initialized: !!authData.initialized,
           configFiles: await configFiles(),
         })
       }
@@ -253,7 +633,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const tail = Math.min(2000, Math.max(10, Number(url.searchParams.get("tail")) || 200))
         try {
           const text = await fs.readFile(path.join("logs", file), "utf8")
-          const lines = text.split("\n")
+          const lines = text.split("\n").map(humanizeLogLine)
           return json(res, 200, { file, lines: lines.slice(-tail) })
         } catch (err) {
           return json(res, 404, { error: String(err.message || err) })
@@ -284,24 +664,87 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             await handle.close()
             offset = stat.size
             const text = buffer.toString("utf8")
-            for (const line of text.split("\n")) if (line.trim()) res.write(`data: ${line}\n`)
+            for (const line of text.split("\n")) if (line.trim()) res.write(`data: ${humanizeLogLine(line)}\n`)
           } catch {}
         }, 1500)
         req.on("close", () => clearInterval(timer))
         return
       }
 
+      if (pathname === "/api/logs/live") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        })
+        const level = String(url.searchParams.get("level") || "info").toLowerCase()
+        const client = {
+          res,
+          rank: LIVE_LEVEL[level] ?? 2,
+          lastId: liveLog.entries.length ? liveLog.entries[liveLog.entries.length - 1].id : 0,
+        }
+        const initial = liveLog.entries.filter(e => e.rank >= client.rank).slice(-300).map(e => humanizeLogLine(e.line))
+        if (initial.length) {
+          try { res.write(`data: ${JSON.stringify({ lines: initial })}\n\n`) } catch {}
+        }
+        liveLog.clients.set(res, client)
+        const ping = setInterval(() => {
+          try { if (!res.writableEnded) res.write(": ping\n\n") } catch {}
+        }, 15000)
+        ping.unref?.()
+        req.on("close", () => { clearInterval(ping); liveLog.clients.delete(res) })
+        return
+      }
+
+      if (pathname === "/api/system") {
+        try {
+          return json(res, 200, await systemInfo(Bot))
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+
       // ---- materials ----
       if (pathname === "/api/materials" && req.method === "GET") {
         const id = url.searchParams.get("bot") || Object.keys(Bot).find(i => Bot[i]?.adapter === adapter)
         const list = []
-        for (const [imageId, item] of adapter.materials[id] || [])
-          list.push({ image_id: imageId, url: item.url, uses: item.uses, uploadedAt: item.t })
+        const byId = new Map()
+        for (const [imageId, item] of adapter.materials[id] || []) {
+          const row = {
+            image_id: imageId,
+            url: item.url,
+            preview_url: item.preview || "",
+            uses: item.uses,
+            uploadedAt: item.t,
+          }
+          list.push(row)
+          byId.set(imageId, row)
+        }
         if (Bot[id]?.sdk?.getMaterialImages)
           try {
-            for (const image of await Bot[id].sdk.getMaterialImages())
-              if (!list.some(i => i.image_id === image.image_id))
-                list.push({ image_id: image.image_id, url: image.url, uses: 0, remote: true })
+            for (const image of await Bot[id].sdk.getMaterialImages()) {
+              const old = byId.get(image.image_id)
+              if (old) {
+                old.preview_url = image.preview_url || old.preview_url
+                old.file_name = image.file_name
+                old.created_at = image.created_at
+                old.expires_at = image.expires_at
+              } else {
+                const row = {
+                  image_id: image.image_id,
+                  url: image.url,
+                  preview_url: image.preview_url || "",
+                  file_name: image.file_name,
+                  created_at: image.created_at,
+                  expires_at: image.expires_at,
+                  uses: 0,
+                  remote: true,
+                }
+                list.push(row)
+                byId.set(image.image_id, row)
+              }
+            }
           } catch (err) {
             return json(res, 200, { list, warning: String(err.message || err) })
           }
@@ -321,18 +764,86 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       }
 
       // ---- groups ----
+      if (pathname === "/api/qq/groups") {
+        const appid = url.searchParams.get("appid")
+        try {
+          const groups = await fetchQQGroups(appid, authData.qqCookie)
+          return json(res, 200, { groups })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
       if (pathname === "/api/groups") {
         const id = url.searchParams.get("bot")
+        // 直接用内存里的群映射，避免 WebUI 反复打开 TRSS 的 LevelDB（会触发 LOCK 冲突）
+        const liveGl = Bot[id]?.gl
+        const map = liveGl instanceof Map ? liveGl : new Map(liveGl && typeof liveGl.entries === "function" ? liveGl : [])
+        const stats = adapter.groupStats?.list(id) || []
+        let appid = Bot[id]?.info?.appid
+        if (!appid) {
+          const line = (config.token || []).find(item => String(item).startsWith(`${id}:`))
+          appid = line?.split(":")[1]
+        }
+        const qqGroups = await fetchQQGroups(appid, authData.qqCookie)
+        await loadGroupAvatarCache()
+        const oneBotIndex = oneBotGroupIndex()
+        const byName = new Map()
+        const ambiguous = new Set()
+        for (const g of qqGroups) {
+          const name = String(g.name || "").trim()
+          if (!name) continue
+          if (byName.has(name)) ambiguous.add(name)
+          else byName.set(name, g)
+        }
+        const avatarOf = async s => {
+          const name = String(s.name || "").trim()
+          return await resolveGroupAvatarMatch(s.group_id, name, byName, oneBotIndex)
+        }
+        const seen = new Set()
         const groups = []
-        for (const [group, info] of (await adapter.getGroupMap?.(id)) || [])
-          groups.push({ group, name: info?.group_name || info?.name || "" })
-        return json(res, 200, { groups })
+        for (const s of stats) {
+          const key = s.group_id
+          seen.add(key)
+          groups.push({
+            group: key,
+            name: s.name || map.get(key)?.group_name || map.get(key)?.name || "",
+            avatar: await avatarOf(s),
+            member_count: s.member_count || 0,
+            bot_role: s.bot_role || "",
+            allow_proactive: !!s.allow_proactive,
+            recv_msg_setting: s.recv_msg_setting || "",
+            commands: s.commands || 0,
+            commands_today: s.days?.[dayKey()]?.commands || 0,
+            messages: s.messages || 0,
+            last_active: s.last_active || 0,
+          })
+        }
+        for (const [group, info] of map)
+          if (!seen.has(group))
+            groups.push({
+              group,
+              name: info?.group_name || info?.name || "",
+              avatar: await avatarOf({ group_id: group, name: info?.group_name || info?.name || "" }),
+              member_count: 0,
+              bot_role: "",
+              allow_proactive: false,
+              recv_msg_setting: "",
+              commands: 0,
+              commands_today: 0,
+              messages: 0,
+              last_active: info?.time || 0,
+            })
+        return json(res, 200, { groups, summary: adapter.groupStats?.summary(id) || null })
+      }
+      if (pathname === "/api/group/stats") {
+        const id = url.searchParams.get("bot")
+        return json(res, 200, adapter.groupStats?.summary(id) || { groups: 0, members: 0, commandsToday: 0, commands7d: 0, activeGroups7d: 0, top: [] })
       }
       if (pathname === "/api/group/members") {
         const id = url.searchParams.get("bot")
         const group = url.searchParams.get("group")
         try {
-          const result = await Bot[id].sdk.groupService.getMembers(group)
+          const result = await Bot[id].sdk.groupService.getMembers(adapter.rawId ? adapter.rawId(group) : group, { forceRefresh: true })
           return json(res, 200, { members: result?.members || result?.data || result })
         } catch (err) {
           return json(res, 500, { error: String(err.message || err) })
@@ -342,7 +853,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const id = url.searchParams.get("bot")
         const group = url.searchParams.get("group")
         try {
-          const result = await Bot[id].sdk.groupService.getMemberBlacklist(group)
+          const result = await Bot[id].sdk.groupService.getMemberBlacklist(adapter.rawId ? adapter.rawId(group) : group)
           return json(res, 200, { users: result?.users || [] })
         } catch (err) {
           return json(res, 500, { error: String(err.message || err) })
@@ -372,6 +883,220 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           return json(res, 200, { ok: true })
         } catch (err) {
           return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+
+      if (pathname === "/api/group/avatar") {
+        const group = String(url.searchParams.get("group") || "").replace(/\D/g, "")
+        if (!group) return json(res, 400, { error: "缺少群号" })
+        const hit = avatarCache.get(group)
+        if (hit && Date.now() - hit.at < 5 * 60 * 1000) {
+          res.writeHead(200, { "Content-Type": hit.type, "Cache-Control": "public, max-age=300" })
+          return res.end(hit.data)
+        }
+        try {
+          const { data, headers } = await axios.get(
+            `https://p.qlogo.cn/gh/${group}/${group}/640/`,
+            { responseType: "arraybuffer", timeout: 10000 },
+          )
+          const type = headers["content-type"] || "image/jpeg"
+          avatarCache.set(group, { at: Date.now(), type, data })
+          res.writeHead(200, { "Content-Type": type, "Cache-Control": "public, max-age=300" })
+          return res.end(Buffer.from(data))
+        } catch {
+          return json(res, 404, { error: "头像获取失败" })
+        }
+      }
+
+      if (pathname === "/api/chat/media") {
+        const raw = url.searchParams.get("url") || ""
+        try {
+          const u = new URL(raw)
+          const host = u.hostname.toLowerCase()
+          if (!/\.(qq\.com|qq\.com\.cn|qlogo\.cn|qpic\.cn|myqcloud\.com)$/.test(host))
+            return json(res, 400, { error: "不支持的图片域名" })
+          const cached = chatMediaCache.get(raw)
+          if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
+            res.writeHead(200, { "Content-Type": cached.type, "Cache-Control": "public, max-age=600" })
+            return res.end(cached.data)
+          }
+          const { data, headers } = await axios.get(raw, {
+            responseType: "arraybuffer",
+            timeout: 12000,
+            maxContentLength: 12 * 1024 * 1024,
+            headers: { Referer: "https://q.qq.com/", "User-Agent": "Mozilla/5.0" },
+          })
+          const sourceType = String(headers["content-type"] || "image/jpeg").split(";")[0].trim()
+          const source = Buffer.from(data)
+          const thumb = await chatThumbnail(source, sourceType)
+          chatMediaCache.set(raw, { at: Date.now(), type: thumb.type, data: thumb.data })
+          if (chatMediaCache.size > 120) chatMediaCache.delete(chatMediaCache.keys().next().value)
+          res.writeHead(200, { "Content-Type": thumb.type, "Cache-Control": "public, max-age=600" })
+          return res.end(thumb.data)
+        } catch (err) {
+          return json(res, 404, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/chat/members") {
+        const id = url.searchParams.get("bot")
+        const group = url.searchParams.get("group")
+        const memberKey = `${id}|${group}`
+        const cachedMembers = chatMembersResponseCache.get(memberKey)
+        if (!url.searchParams.get("refresh") && cachedMembers && Date.now() - cachedMembers.at < 30000)
+          return json(res, 200, cachedMembers.data)
+        const local = typeof adapter.groupChat?.members === "function" ? adapter.groupChat.members(id, group) : []
+        const cache = adapter.memberCache
+        const appid = Bot[id]?.info?.appid
+        const rawId = value => String(value || "").replace(/^[^:]+:/, "")
+        const decorate = m => {
+          const openid = rawId(m.member_openid || m.openid || m.user_id)
+          const hit = openid && cache?.get ? cache.get(id, group, openid) : null
+          const name = m.username || m.nickname || hit?.name || openid
+          const avatar = m.avatar || m.avatar_url || hit?.avatar ||
+            (appid && openid ? `https://thirdqq.qlogo.cn/qqapp/${appid}/${openid}/640` : "")
+          return {
+            ...m,
+            member_openid: openid || m.member_openid,
+            username: name,
+            avatar,
+            member_role: m.member_role || m.role || hit?.role || "",
+            cachedAt: hit?.updatedAt || 0,
+            stale: !!hit?.stale,
+          }
+        }
+        let remote = []
+        let localOnly = true
+        let warning = ""
+        try {
+          const result = await Bot[id].sdk.groupService.getMembers(adapter.rawId ? adapter.rawId(group) : group, { forceRefresh: true })
+          remote = result?.members || result?.data || result || []
+          for (const m of remote) {
+            const openid = rawId(m.member_openid || m.openid)
+            if (openid) cache?.set?.(id, group, openid, {
+              name: m.username || m.nickname,
+              avatar: m.avatar || m.avatar_url,
+              role: m.member_role,
+              bot: m.bot,
+              joinedAt: m.joined_at,
+            })
+          }
+          localOnly = false
+        } catch (err) {
+          warning = String(err.response?.data?.message || err.message || err)
+        }
+        const botRole = typeof adapter.groupStats?.get === "function" ? adapter.groupStats.get(id, group)?.bot_role || "" : ""
+        if (!remote.length && local.length) localOnly = true
+        const localMerged = local.map(decorate)
+        const seen = new Set(localMerged.map(m => m.member_openid))
+        for (const m of cache?.list?.(id, group) || []) {
+          if (!m.openid || seen.has(m.openid)) continue
+          localMerged.push(decorate({ member_openid: m.openid, username: m.name, avatar: m.avatar, member_role: m.role }))
+        }
+        const payload = {
+          members: remote.length ? remote.map(decorate) : localMerged,
+          localOnly,
+          local: localMerged,
+          bot_role: botRole,
+          warning,
+          cache_ttl: cache?.ttl || 300000,
+        }
+        chatMembersResponseCache.set(memberKey, { at: Date.now(), data: payload })
+        if (chatMembersResponseCache.size > 80) chatMembersResponseCache.delete(chatMembersResponseCache.keys().next().value)
+        return json(res, 200, payload)
+      }
+      if (pathname === "/api/group/recall" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        if (!Bot[body.bot]) return json(res, 400, { error: "机器人不在线" })
+        try {
+          const result = await adapter.recallGroupMsg(
+            { bot: Bot[body.bot], self_id: body.bot, group_id: body.group },
+            body.message_id,
+          )
+          adapter.groupChat?.markRecalled(body.bot, body.group, body.message_id)
+          return json(res, 200, { ok: true, result })
+        } catch (err) {
+          return json(res, 500, { error: String(err.response?.data?.message || err.message || err) })
+        }
+      }
+
+      // ---- group chat ----
+      if (pathname === "/api/group/messages") {
+        const id = url.searchParams.get("bot")
+        const group = url.searchParams.get("group")
+        const limit = Math.min(200, Number(url.searchParams.get("limit")) || 100)
+        const since = Number(url.searchParams.get("since")) || 0
+        const messages = adapter.groupChat?.list(id, group, limit, since) || []
+        return json(res, 200, { messages })
+      }
+      if (pathname === "/api/group/stream") {
+        const id = url.searchParams.get("bot")
+        const group = url.searchParams.get("group")
+        let since = Number(url.searchParams.get("since")) || 0
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        })
+        res.write(": connected\n\n")
+        const push = () => {
+          const list = adapter.groupChat?.list(id, group, 100, since) || []
+          for (const m of list) {
+            since = Math.max(since, m.id)
+            res.write(`data: ${JSON.stringify(m)}\n\n`)
+          }
+        }
+        push()
+        const timer = setInterval(() => {
+          try { push() } catch { clearInterval(timer) }
+        }, 1000)
+        timer.unref?.()
+        req.on("close", () => clearInterval(timer))
+        return
+      }
+      if (pathname === "/api/group/send" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        const id = body.bot
+        const group = body.group
+        const text = String(body.text || "").trim()
+        const images = Array.isArray(body.images) ? body.images.slice(0, 9) : []
+        const reply = String(body.reply || "").trim()
+        const rawMentions = Array.isArray(body.mentions) ? body.mentions : (body.mention ? [body.mention] : [])
+        const mentions = [...new Set(rawMentions.map(v => String(v || "").trim().replace(/^[^:]+:/, "")).filter(Boolean))]
+        if (!Bot[id]) return json(res, 400, { error: "机器人不在线或未配置" })
+        if (!group) return json(res, 400, { error: "请选择群" })
+        const msg = []
+        if (reply) msg.push({ type: "reply", id: reply })
+        for (const mention of mentions) msg.push({ type: "at", user_id: mention })
+        if (text) msg.push({ type: "text", text })
+        for (const raw of images) {
+          const match = String(raw || "").match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/)
+          if (!match) continue
+          const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64")
+          if (!buffer.length || buffer.length > 8 * 1024 * 1024) continue
+          msg.push({ type: "image", file: buffer, name: `image.${match[1].split("/")[1] || "png"}` })
+        }
+        if (!msg.length) return json(res, 400, { error: "消息不能为空" })
+        try {
+          const data = {
+            bot: Bot[id],
+            self_id: id,
+            post_type: "message",
+            message_type: "group",
+            sub_type: "normal",
+            group_id: group,
+          }
+          const ret = await adapter.sendGroupMsg(data, msg)
+          if (ret === false) throw new Error("消息发送失败")
+          if (!ret?.message_id?.length) {
+            const err = ret?.error?.[0]
+            if (err) throw new Error(String(err?.response?.data?.message || err?.message || "消息发送失败"))
+            throw new Error("消息发送失败：没有可用的被动回复，且主动消息不可用")
+          }
+          const message = adapter.groupChat?.list(id, group, 1).at(-1) || null
+          return json(res, 200, { ok: true, message })
+        } catch (err) {
+          return json(res, 500, { error: String(err.response?.data?.message || err.message || err) })
         }
       }
 
@@ -436,15 +1161,37 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             authData.qqCookie = result.cookie
             authData.qqCookieAt = Date.now()
             authData.qqDeveloper = result.developer || null
+            qqGroupCache.clear()
             await saveAuth(authData)
+            setTimeout(collectStats, 1000)
           }
           return json(res, 200, result)
         } catch (err) {
           return json(res, 400, { error: String(err.message || err) })
         }
       }
+      if (pathname === "/api/qq/select-developer" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        try {
+          const result = await selectDeveloper(body.id, body.developerId)
+          if (result.cookie) {
+            authData.qqCookie = result.cookie
+            authData.qqCookieAt = Date.now()
+            authData.qqDeveloper = result.developer || null
+            await saveAuth(authData)
+          }
+          return json(res, 200, {
+            ok: true,
+            developer: result.developer,
+            nickname: result.nickname,
+            login: true,
+          })
+        } catch (err) {
+          return json(res, 400, { error: String(err.message || err) })
+        }
+      }
       if (pathname === "/api/qq/bots") {
-        if (!authData.qqCookie) return json(res, 401, { error: "请先登录 QQ 开放平台" })
+        if (!authData.qqCookie) return json(res, 400, { error: "请先登录 QQ 开放平台" })
         try {
           const { data } = await axios.get("https://bot.q.qq.com/cgi-bin/v2/info/list_bots", {
             headers: { Cookie: authData.qqCookie },
@@ -469,7 +1216,9 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         if (!cookie) return json(res, 400, { error: "cookie 为空" })
         authData.qqCookie = cookie
         authData.qqCookieAt = Date.now()
+        qqGroupCache.clear()
         await saveAuth(authData)
+        setTimeout(collectStats, 1000)
         return json(res, 200, { ok: true })
       }
       if (pathname === "/api/stats") {
@@ -486,33 +1235,11 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             appid = line?.split(":")[1]
           }
         }
-        if (!authData.qqCookie) return json(res, 401, { error: "请先在 WebUI 中导入 QQ 开放平台 Cookie" })
+        if (!authData.qqCookie) return json(res, 400, { error: "请先在 WebUI 中导入 QQ 开放平台 Cookie" })
         if (!appid) return json(res, 400, { error: "找不到 AppID" })
-        const dataRange = statsRange[range] ?? 2
         try {
-          const { data } = await axios.post(
-            STATS_API,
-            { bot_appid: Number(appid), data_range: dataRange, data_type: 4 },
-            { headers: { Cookie: authData.qqCookie, "Content-Type": "application/json" }, timeout: 15000 },
-          )
-          if (data?.retcode !== 0) return json(res, 400, { error: data?.msg || "接口返回错误" })
-          let rows = (data.data?.developer_metrics_data || []).map(mapDaily).sort((a, b) => a.date.localeCompare(b.date))
-          if (start || end)
-            rows = rows.filter(r => (!start || r.date >= start.replace(/-/g, "")) && (!end || r.date <= end.replace(/-/g, "")))
-          if (range === "month") {
-            const month = String(new Date().getFullYear()) + String(new Date().getMonth() + 1).padStart(2, "0")
-            rows = rows.filter(r => r.date.startsWith(month))
-          }
-          if (range === "today") rows = rows.slice(-1)
-          else if (range === "yesterday") rows = rows.slice(-2, -1)
-          return json(res, 200, {
-            appid,
-            range,
-            daily: rows,
-            summary: summarize(rows),
-            updatedAt: Date.now(),
-            limited: "官方接口仅提供最近 7/14/30 天，月/总览/自定义范围基于 30 天数据计算",
-          })
+          const result = await fetchStats({ appid, range, start, end, cookie: authData.qqCookie })
+          return json(res, 200, { appid, range, ...result, updatedAt: Date.now() })
         } catch (err) {
           return json(res, 500, { error: String(err.response?.data?.msg || err.message || err) })
         }
@@ -529,8 +1256,13 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
   auth.then(authData => {
     logger.info(logger.magenta("================ QQBot WebUI ================"))
     logger.info(logger.magenta(`地址：http://127.0.0.1:${port}/`))
-    logger.info(logger.magenta(`密码：${authData.password}`))
-    logger.info(logger.magenta(`密码也会保存在：${path.resolve(AUTH_FILE)}`))
+    if (!authData.initialized) {
+      logPasswordBanner(logger, authData.password)
+      logger.info(logger.magenta(`密码也会保存在：${path.resolve(AUTH_FILE)}`))
+      logger.info(logger.magenta("首次登录后必须设置新密码，之后不再打印密码"))
+    } else {
+      logger.info(logger.magenta("WebUI 密码已设置，不再打印初始密码"))
+    }
     logger.info(logger.magenta("Docker 部署请把宿主机端口反向代理到容器内 IP:端口"))
     logger.info(logger.magenta("============================================"))
   })

@@ -3,76 +3,90 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QQBot WebUI</title>
-<style>
-:root{--bg:#f4f6fb;--card:#fff;--line:#e5e9f2;--text:#1f2430;--muted:#7b8494;--brand:#3b82f6;--ok:#16a34a;--warn:#d97706;--bad:#dc2626}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
-a{color:var(--brand)}
-.login{position:fixed;inset:0;background:linear-gradient(135deg,#1e3a8a,#3b82f6);display:flex;align-items:center;justify-content:center;z-index:10}
-.login .box{background:#fff;padding:28px;border-radius:14px;width:340px;box-shadow:0 20px 60px #0004}
-.login h1{margin:0 0 6px;font-size:20px}.login p{color:var(--muted);margin:0 0 18px}
-input,select,textarea,button{font:inherit}input,select,textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--text)}
-textarea{width:100%;min-height:420px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5}
-button{border:0;border-radius:8px;padding:8px 14px;background:var(--brand);color:#fff;cursor:pointer}
-button.ghost{background:#eef4ff;color:var(--brand)}button.danger{background:#fee2e2;color:var(--bad)}
-button:disabled{opacity:.5;cursor:not-allowed}
-header{display:flex;gap:16px;align-items:center;padding:14px 22px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-header h1{font-size:16px;margin:0}header .sp{flex:1}
-nav{display:flex;gap:6px;padding:10px 22px;background:#fff;border-bottom:1px solid var(--line);overflow:auto}
-nav button{background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px}
-nav button.on{background:#eef4ff;color:var(--brand);font-weight:600}
-main{padding:20px 22px 60px;max-width:1400px;margin:0 auto}
-.grid{display:grid;gap:14px}.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-.card .k{color:var(--muted);font-size:12px}.card .v{font-size:24px;font-weight:700;margin-top:4px}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.row.between{justify-content:space-between}
-h2{font-size:16px;margin:18px 0 10px}.muted{color:var(--muted)}
-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
-th{background:#f8faff;color:var(--muted);font-weight:600}
-tr:last-child td{border-bottom:0}
-pre.log{background:#0f172a;color:#dbeafe;padding:12px;border-radius:10px;max-height:60vh;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all}
-.hide{display:none!important}
-.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef4ff;color:var(--brand);font-size:12px}
-.pill.ok{background:#dcfce7;color:var(--ok)}.pill.bad{background:#fee2e2;color:var(--bad)}
-.bar{height:8px;background:#eef2f7;border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--brand)}
-td .bar{min-width:80px}
-.toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:10px 14px;border-radius:10px;opacity:0;transition:.2s;z-index:20}
-.toast.on{opacity:1}
-</style>
+<title>QQBot Console</title>
+<link rel="icon" href="/assets/qqbot.svg" type="image/svg+xml">
+<script>
+try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset.theme=t||'dark'}catch(e){}
+</script>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/vendor/katex.min.css">
 </head>
 <body>
 
 <div class="login" id="login">
-  <div class="box">
-    <h1>QQBot WebUI</h1>
-    <p>密码在 TRSS 日志（logger.info）或 data/QQBot/webui.json 中</p>
-    <input id="pwd" type="password" placeholder="输入密码" style="width:100%;margin-bottom:12px">
-    <button id="loginBtn" style="width:100%">登录</button>
-    <button id="showPwd" class="ghost" style="width:100%;margin-top:8px">打印密码到日志（冷却 30 秒）</button>
-    <p id="pwdTip" style="margin-top:8px;color:#2563eb;word-break:break-all"></p>
-    <p id="loginErr" style="color:#dc2626;margin-top:10px"></p>
+  <div class="login-visual">
+    <div class="login-logo"><img src="/assets/qqbot.svg" alt="QQ"></div>
+    <h2>QQBot<br><span>Command Center</span></h2>
+    <p>统一管理机器人配置、运行日志、素材、群成员与运营数据。所有改动即时生效，所有指标一目了然。</p>
+    <ul class="login-points">
+      <li><i>01</i> 多机器人统一控制台</li>
+      <li><i>02</i> q.qq.com 运营数据实时同步</li>
+      <li><i>03</i> 群管理 / 黑名单 / 指令面板</li>
+    </ul>
+    <div class="login-foot">TRSS-Yunzai · qq-official-bot adapter</div>
+  </div>
+  <div class="login-form-wrap">
+    <div class="box" id="loginView">
+      <h1>欢迎回来</h1>
+      <p id="loginHint">首次登录密码在 TRSS 日志中（logger.info）</p>
+      <input id="pwd" type="password" placeholder="输入访问密码" autocomplete="current-password">
+      <button id="loginBtn">进入控制台</button>
+      <button id="showPwd" class="ghost" style="display:none">打印密码到日志（冷却 30 秒）</button>
+      <p id="pwdTip"></p>
+      <p id="loginErr"></p>
+    </div>
+    <div class="box hide" id="setupView">
+      <h1>设置访问密码</h1>
+      <p>首次登录成功。请设置你自己的密码，之后不再打印初始密码。</p>
+      <input id="newPwd" type="password" placeholder="新密码（至少 8 位）" autocomplete="new-password">
+      <input id="newPwd2" type="password" placeholder="再次输入新密码" autocomplete="new-password">
+      <button id="setupBtn">保存并进入</button>
+      <p id="setupErr"></p>
+    </div>
   </div>
 </div>
 
-<header>
-  <h1>QQBot WebUI</h1>
-  <span class="muted" id="version"></span>
-  <div class="sp"></div>
-  <select id="botSel" style="min-width:180px"></select>
-  <button class="ghost" id="logout">退出</button>
-</header>
-<nav>
-  <button data-tab="stats" class="on">运营数据</button>
-  <button data-tab="config">配置</button>
-  <button data-tab="logs">日志</button>
-  <button data-tab="materials">素材</button>
-  <button data-tab="groups">群管理</button>
-  <button data-tab="qq">QQ 登录</button>
-  <button data-tab="menu">菜单/面板</button>
-</nav>
-<main>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="brand-mark"><img src="/assets/qqbot.svg" alt="QQ"></div><div><strong>QQBot</strong><span>Console</span></div></div>
+    <div class="side-label">Current bot</div>
+    <div class="bot-picker" id="botPicker">
+      <button class="bot-current" id="botCurrent" aria-haspopup="listbox">
+        <img class="bot-avatar" id="botCurrentAvatar" alt="">
+        <span class="bot-current-text"><strong id="botCurrentName">未选择机器人</strong><small id="botCurrentMeta">点击选择</small></span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="bot-menu hide" id="botMenu" role="listbox"></div>
+    </div>
+    <select id="botSel" class="hide"></select>
+    <nav>
+      <button data-tab="stats" class="on"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span>运营数据</button>
+      <button data-tab="config"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>配置</button>
+      <button data-tab="logs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span>日志</button>
+      <button data-tab="system"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>系统状态</button>
+      <button data-tab="materials"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>素材</button>
+      <button data-tab="groups"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>群管理</button>
+      <button data-tab="chat"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3.5a8.4 8.4 0 0 1 9 8z"/></svg></span>群聊</button>
+      <button data-tab="qq"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15 8m0 0l3 3m-3-3l3-3"/></svg></span>QQ 登录</button>
+      <button data-tab="menu"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></span>菜单 / 面板</button>
+    </nav>
+    <div class="side-foot">
+      <div class="side-status"><span class="pulse"></span><span>WebUI 已连接</span></div>
+      <div class="side-meta"><span id="version"></span><span>WebUI</span></div>
+      <button class="logout-btn" id="logout">退出登录</button>
+    </div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="打开菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <div class="page-head"><h1 id="pageTitle">运营数据</h1><p id="pageSub">机器人增长、消息与用户活跃度总览</p></div>
+      <div class="top-actions">
+        <span class="conn"><i></i><span id="topStatusText">连接中</span></span>
+        <button class="icon-btn" id="cmdBtn" aria-label="命令面板" title="Ctrl+K"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+        <button class="icon-btn" id="themeBtn" aria-label="切换主题"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></button>
+      </div>
+    </header>
+    <main>
   <section id="tab-stats">
     <div class="row between">
       <div class="row">
@@ -87,10 +101,41 @@ td .bar{min-width:80px}
       <div class="row">
         <input type="date" id="start"> ~ <input type="date" id="end">
         <button id="customRange">自定义</button>
+        <button class="ghost" id="statRefresh">刷新</button>
+        <button class="ghost" id="autoRefresh">自动刷新：关</button>
+        <button class="ghost" id="statExport">导出 JSON</button>
       </div>
     </div>
     <p class="muted" id="statsTip">需要先在「QQ 登录」里导入 q.qq.com 的 Cookie；官方接口只提供最近 7/14/30 天。</p>
     <div class="grid cards" id="statCards"></div>
+    <h2>详细指标</h2>
+    <div class="grid cards" id="metricCards"></div>
+    <h2>用户画像</h2>
+    <div class="grid dist-grid" id="profileGrid"></div>
+    <h2>群分布</h2>
+    <div class="grid dist-grid" id="groupDistGrid"></div>
+    <div id="hotCommandsWrap" class="hide">
+      <h2>热门指令</h2>
+      <div style="overflow:auto"><table id="hotCommandsTable"></table></div>
+    </div>
+    <div id="extraDataWrap" class="hide">
+      <h2>其他接口数据</h2>
+      <div class="grid" id="extraData"></div>
+    </div>
+    <h2>群指令使用（本地统计）</h2>
+    <div class="grid cards" id="groupCards"></div>
+    <div style="overflow:auto"><table id="groupTopTable"></table></div>
+    <div class="card chart-card">
+      <div class="chart-head">
+        <div><strong>趋势</strong><span class="muted" id="chartHint">按天统计</span></div>
+        <div class="seg" id="chartMetrics">
+          <button data-metric="messages" class="on">消息量</button>
+          <button data-metric="activeUsers">活跃用户</button>
+          <button data-metric="newUsers">新增用户</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="statChart"></canvas><div class="chart-empty hide" id="chartEmpty">暂无数据</div></div>
+    </div>
     <h2>每日数据</h2>
     <div style="overflow:auto"><table id="statTable"></table></div>
   </section>
@@ -100,6 +145,7 @@ td .bar{min-width:80px}
       <select id="cfgFile"></select>
       <button class="ghost" id="cfgReload">重新读取</button>
       <button id="cfgSave">保存</button>
+      <span class="muted" id="cfgDirty"></span>
       <span class="muted">保存后部分设置需要重启 TRSS；未上线机器人也可先配置。</span>
     </div>
     <textarea id="cfgText" spellcheck="false" style="margin-top:12px"></textarea>
@@ -110,35 +156,91 @@ td .bar{min-width:80px}
       <select id="logFile"></select>
       <input id="logTail" type="number" value="200" min="10" max="2000" style="width:100px">
       <button class="ghost" id="logLoad">加载</button>
+      <input id="logSearch" placeholder="搜索日志…" style="min-width:180px">
+      <select id="logLevel" title="实时日志级别">
+        <option value="all">全部级别</option>
+        <option value="debug">DEBUG 及以上</option>
+        <option value="info" selected>INFO 及以上（默认）</option>
+        <option value="warn">WARN 及以上</option>
+        <option value="error">ERROR 及以上</option>
+      </select>
+      <button class="ghost" id="logPause">暂停</button>
       <button id="logLive">实时：关</button>
+      <button class="ghost" id="logDownload">下载</button>
     </div>
-    <pre class="log" id="logText">选择日志文件后加载</pre>
+    <pre class="log" id="logText">点击「实时」开始监听 TRSS 全部插件日志，或选择文件加载历史日志</pre>
+  </section>
+
+  <section id="tab-system" class="hide">
+    <div class="row between"><h2 style="margin:0">系统状态</h2><div class="row"><span class="muted" id="sysUpdated"></span><button class="ghost" id="sysReload">刷新</button></div></div>
+    <div class="grid cards" id="sysCards"></div>
+    <h2>详细信息</h2>
+    <div class="table-wrap"><table id="sysTable"></table></div>
   </section>
 
   <section id="tab-materials" class="hide">
-    <div class="row between"><h2 style="margin:0">素材管理</h2><button class="ghost" id="matReload">刷新</button></div>
+    <div class="row between"><h2 style="margin:0">素材管理</h2><div class="row"><input id="matSearch" placeholder="搜索 image_id / URL" style="min-width:220px"><button class="ghost" id="matReload">刷新</button></div></div>
     <p class="muted">这里管理 Markdown 素材（qqbot-media://）。删除后已发送消息不受影响。</p>
     <div style="overflow:auto"><table id="matTable"></table></div>
   </section>
 
   <section id="tab-groups" class="hide">
+    <div class="grid cards" id="grpCards"></div>
+    <div style="overflow:auto;margin-top:14px"><table id="grpTable"></table></div>
+    <h2>群成员</h2>
     <div class="row">
       <select id="grpSel"></select>
       <button class="ghost" id="grpReload">刷新群列表</button>
     </div>
-    <div style="overflow:auto;margin-top:12px"><table id="memTable"></table></div>
+    <div class="row" style="margin-top:12px"><input id="memSearch" placeholder="搜索成员 openid / 昵称" style="min-width:240px"><span class="muted" id="memCount"></span></div>
+    <div style="overflow:auto;margin-top:10px"><table id="memTable"></table></div>
     <h2>群黑名单</h2>
     <div class="row"><input id="blInput" placeholder="member openid" style="min-width:260px"><button id="blAdd">加入黑名单</button><button class="ghost" id="blDel">移出黑名单</button><button class="ghost" id="blReload">刷新</button></div>
     <div style="overflow:auto;margin-top:10px"><table id="blTable"></table></div>
   </section>
 
+  <section id="tab-chat" class="hide">
+    <div class="chat-layout">
+      <aside class="chat-side">
+        <div class="chat-side-head"><h2>群聊</h2><span class="muted" style="font-size:10px">实时刷新</span></div>
+        <div class="chat-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="chatSearch" placeholder="搜索群名称…" autocomplete="off"></div>
+        <div class="chat-groups" id="chatGroups"><div class="muted" style="padding:12px">加载中…</div></div>
+      </aside>
+      <article class="chat-main">
+        <header class="chat-head">
+          <div id="chatTitle">选择一个群</div>
+          <span class="muted" id="chatMeta"></span>
+        </header>
+        <div class="chat-messages" id="chatMessages"><div class="chat-empty">左侧选择群，查看实时消息</div></div>
+        <div class="chat-reply-bar hide" id="chatReplyBar"><span>回复 <b id="chatReplyName"></b></span><button id="chatReplyCancel" class="ghost">×</button></div>
+        <div class="chat-reply-bar hide" id="chatMentionBar"><span>将 @ <b id="chatMentionName"></b></span><button id="chatMentionCancel" class="ghost">×</button></div>
+        <div class="chat-compose">
+          <div class="chat-previews hide" id="chatPreviews"></div>
+          <div class="chat-tools">
+            <button class="icon-btn" id="chatPick" type="button" title="选择本地图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></button>
+            <input id="chatFile" type="file" accept="image/*" multiple hidden>
+            <span class="muted">支持 Ctrl+V 粘贴图片，最多 9 张</span>
+          </div>
+          <textarea id="chatInput" rows="2" placeholder="发送消息… Ctrl+Enter 发送"></textarea>
+          <button id="chatSend">发送</button>
+        </div>
+      </article>
+      <aside class="chat-members">
+        <div class="chat-side-head"><h2>成员</h2><span class="muted" id="chatMemberCount"></span></div>
+        <div class="chat-member-list" id="chatMemberList"><div class="muted" style="padding:12px">加载中…</div></div>
+      </aside>
+    </div>
+  </section>
+
   <section id="tab-menu" class="hide">
     <h2>自定义菜单（仅 C2C 生效）</h2>
-    <div class="row"><button class="ghost" id="menuLoad">读取</button><button id="menuSave">保存菜单</button><span class="muted" id="menuMsg"></span></div>
-    <textarea id="menuJson" spellcheck="false" style="min-height:220px" placeholder='{"menu": {...}}'></textarea>
+    <p class="muted">自定义菜单仅 C2C 生效。支持 send_message / link / menu（子菜单）/ switch 四种类型，最多 5 个一级菜单。</p>
+    <div class="row"><button class="ghost" id="menuLoad">读取</button><button id="menuSave">保存菜单</button><button class="ghost" id="menuSample">填入示例</button><button class="ghost" id="menuFormat">格式化</button><span class="muted" id="menuMsg"></span></div>
+    <textarea id="menuJson" spellcheck="false" style="min-height:220px" placeholder='{"items": [...]}'></textarea>
     <h2>指令面板</h2>
-    <div class="row"><button id="panelCreate">创建面板（JSON）</button><button class="ghost" id="panelReload">刷新列表</button><span class="muted" id="panelMsg"></span></div>
-    <textarea id="panelJson" spellcheck="false" style="min-height:120px" placeholder='{"channel": {...}, "dm": {...}}'></textarea>
+    <p class="muted">指令面板需要 scope（group / c2c / channel / dm）和 panel.items，target_type=all 表示对所有群生效。</p>
+    <div class="row"><button id="panelCreate">创建面板（JSON）</button><button class="ghost" id="panelReload">刷新列表</button><button class="ghost" id="panelSample">填入示例</button><span class="muted" id="panelMsg"></span></div>
+    <textarea id="panelJson" spellcheck="false" style="min-height:140px" placeholder='{"scope":"group","target_type":"all","panel":{"items":[...]}}'></textarea>
     <div style="overflow:auto;margin-top:10px"><table id="panelTable"></table></div>
   </section>
 
@@ -149,6 +251,11 @@ td .bar{min-width:80px}
       <div class="row" style="justify-content:center"><button id="qrStart">扫码登录</button><span class="muted" id="qrMsg">未开始</span></div>
       <img id="qrImg" style="display:none;width:180px;height:180px;margin:12px auto 0" alt="QQ 登录二维码">
     </div>
+    <div id="qqDevsWrap" class="hide">
+      <h2>选择开发账号</h2>
+      <p class="muted">同一个 QQ 可能有多个开发账号，每个账号下的机器人不同。</p>
+      <div class="grid cards" id="qqDevs"></div>
+    </div>
     <h2>选择机器人</h2>
     <div class="grid cards" id="qqBots"><div class="card muted">登录后这里会列出该 QQ 名下的机器人</div></div>
     <h2>或粘贴 Cookie</h2>
@@ -156,305 +263,56 @@ td .bar{min-width:80px}
     <textarea id="qqCookie" style="min-height:120px;margin-top:12px" placeholder="uin=o...; skey=...; p_uin=...; pt4_token=..."></textarea>
     <div class="row" style="margin-top:10px"><button id="qqSave">保存 Cookie</button><button class="ghost" id="qqCheck">检测</button></div>
   </section>
-</main>
+    </main>
+  </div>
+</div>
+<div class="modal hide" id="palette">
+  <div class="modal-box palette-box">
+    <div class="palette-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="paletteInput" placeholder="搜索页面或操作…" autocomplete="off"></div>
+    <div class="palette-list" id="paletteList"></div>
+    <div class="palette-foot"><span>↑ ↓ 选择</span><span>Enter 执行</span><span>Esc 关闭</span></div>
+  </div>
+</div>
+<div class="modal hide" id="help">
+  <div class="modal-box help-box">
+    <div class="modal-head"><strong>快捷键</strong><button class="icon-btn" data-close="help">×</button></div>
+    <div class="help-grid">
+      <span>切换页面</span><kbd>Alt</kbd><kbd>1</kbd> ~ <kbd>9</kbd>
+      <span>命令面板</span><kbd>Ctrl</kbd><kbd>K</kbd>
+      <span>保存配置</span><kbd>Ctrl</kbd><kbd>S</kbd>
+      <span>关闭弹层</span><kbd>Esc</kbd>
+      <span>帮助</span><kbd>?</kbd>
+    </div>
+  </div>
+</div>
+<div class="modal hide" id="muteDialog">
+  <div class="modal-box mute-box">
+    <div class="modal-head"><strong>禁言 <span id="muteName"></span></strong><button class="icon-btn" id="muteCancel">×</button></div>
+    <div class="mute-presets">
+      <button class="ghost" data-mute-sec="60">1 分钟</button>
+      <button class="ghost" data-mute-sec="300">5 分钟</button>
+      <button class="ghost" data-mute-sec="600">10 分钟</button>
+      <button class="ghost" data-mute-sec="1800">30 分钟</button>
+      <button class="ghost" data-mute-sec="3600">1 小时</button>
+      <button class="ghost" data-mute-sec="86400">1 天</button>
+    </div>
+    <div class="mute-row">
+      <input id="muteCustom" type="number" min="1" value="10">
+      <select id="muteUnit"><option value="60">分钟</option><option value="1">秒</option><option value="3600">小时</option><option value="86400">天</option></select>
+      <button id="muteConfirm">确认禁言</button>
+    </div>
+    <p class="muted" id="muteErr" style="color:#fda4af"></p>
+    <p class="muted">最长 30 天；需要机器人是群主或管理员。</p>
+  </div>
+</div>
+<div class="ctx-menu hide" id="ctxMenu"></div>
 <div class="toast" id="toast"></div>
+<script src="/vendor/marked.umd.js"></script>
+<script src="/vendor/katex.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
 
-<script>
-const $ = s => document.querySelector(s)
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))
-let state = { bots: [], bot: "", appid: localStorage.getItem("qqbot_appid") || "", qqBotName: localStorage.getItem("qqbot_name") || "", tab: "stats", logTimer: null, range: "7d" }
-const toast = msg => { const t=$("#toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2200) }
-async function api(url, opts={}) {
-  const res = await fetch(url, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts })
-  if (res.status === 401) { $("#login").style.display = "flex"; throw new Error("未登录") }
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || res.statusText)
-  return data
-}
-$("#loginBtn").onclick = async () => {
-  try {
-    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#pwd").value }) })
-    $("#login").style.display = "none"; location.reload()
-  } catch (e) { $("#loginErr").textContent = e.message }
-}
-$("#showPwd").onclick = async () => {
-  const btn = $("#showPwd")
-  try {
-    const res = await fetch("/api/password", { method: "POST", credentials: "same-origin" })
-    const data = await res.json()
-    if (!res.ok) {
-      $("#pwdTip").textContent = data.error === "冷却中" ? `冷却中，请 ${data.wait} 秒后再试` : (data.error || "获取失败")
-      return
-    }
-    $("#pwdTip").textContent = "密码已打印到 TRSS 日志，请查看控制台"
-    btn.disabled = true
-    let left = data.cooldown || 30
-    btn.textContent = `冷却中 ${left}s`
-    const timer = setInterval(() => {
-      left--
-      if (left <= 0) { clearInterval(timer); btn.disabled = false; btn.textContent = "打印密码到日志（冷却 30 秒）" }
-      else btn.textContent = `冷却中 ${left}s`
-    }, 1000)
-  } catch (e) { $("#pwdTip").textContent = e.message }
-}
-$("#logout").onclick = async () => { document.cookie = "qqbot_webui=; Max-Age=0; path=/"; location.reload() }
-
-async function loadStatus() {
-  const s = await api("/api/status")
-  $("#version").textContent = "v" + s.version + " · 端口 " + s.port
-  state.bots = s.bots
-  $("#botSel").innerHTML = s.bots.map(b => `<option value="${esc(b.id)}">${esc(b.id)}${b.online?" · 在线":" · 离线"}</option>`).join("") || "<option>无机器人</option>"
-  state.bot = s.bots[0]?.id || ""
-  $("#cfgFile").innerHTML = s.configFiles.map(f => `<option>${esc(f)}</option>`).join("")
-  await loadConfig()
-  await loadLogs()
-}
-
-/* tabs */
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b))
-  document.querySelectorAll("main > section").forEach(s => s.classList.add("hide"))
-  $("#tab-" + b.dataset.tab).classList.remove("hide")
-  state.tab = b.dataset.tab
-  if (b.dataset.tab === "stats") loadStats(state.range)
-  if (b.dataset.tab === "materials") loadMaterials()
-  if (b.dataset.tab === "groups") loadGroups()
-  if (b.dataset.tab === "qq") loadQQ()
-  if (b.dataset.tab === "menu") loadMenu()
-})
-$("#botSel").onchange = () => { state.bot = $("#botSel").value; if (state.tab==="stats") loadStats(state.range); if (state.tab==="materials") loadMaterials() }
-
-/* stats */
-function rangeLabel(r){ return ({today:"今天",yesterday:"昨天","7d":"近 7 天","14d":"近 14 天","30d":"近 30 天",month:"本月",total:"总览"})[r] || r }
-async function loadStats(range, start, end) {
-  state.range = range
-  const q = new URLSearchParams({ bot: state.bot, range })
-  if (state.appid) q.set("appid", state.appid)
-  if (start) q.set("start", start); if (end) q.set("end", end)
-  $("#statCards").innerHTML = "<div class='card'>加载中…</div>"
-  try {
-    const data = await api("/api/stats?" + q)
-    const s = data.summary
-    $("#statCards").innerHTML = [
-      ["活跃用户", s.activeUsers, "人次"],
-      ["消息量", s.messages, "条"],
-      ["单聊 / 群聊", (s.c2c||0)+" / "+(s.group||0), "条"],
-      ["新增用户", s.newUsers, "人"],
-      ["回复率", s.replyRate + "%", "回复 " + s.replyCount + " 条"],
-      ["总好友 / 总群", (s.friends||0)+" / "+(s.groups||0), "库存"],
-    ].map(([k,v,x])=>`<div class="card"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="k">${esc(x)}</div></div>`).join("")
-    $("#statsTip").textContent = (data.limited || "") + " · " + rangeLabel(range)
-    const rows = (data.daily || []).slice().reverse()
-    const max = Math.max(1, ...rows.map(r => r.messages))
-    $("#statTable").innerHTML = "<tr><th>日期</th><th>活跃用户</th><th>活跃群</th><th>消息量</th><th>单聊/群聊</th><th>好友/群总数</th><th>回复率</th></tr>" +
-      rows.map(r => `<tr><td>${esc(r.date)}</td><td>${r.activeUsers}</td><td>${r.activeGroups}</td><td>${r.messages}<div class="bar"><i style="width:${Math.round(r.messages/max*100)}%"></i></div></td><td>${r.c2c}/${r.group}</td><td>${r.friends}/${r.groups}</td><td>${(r.replyRate*100).toFixed(2)}%</td></tr>`).join("")
-  } catch (e) {
-    $("#statCards").innerHTML = `<div class="card" style="color:#dc2626">${esc(e.message)}</div>`
-  }
-}
-document.querySelectorAll("[data-range]").forEach(b => b.onclick = () => loadStats(b.dataset.range))
-$("#customRange").onclick = () => loadStats("custom", $("#start").value, $("#end").value)
-
-/* config */
-$("#cfgFile").onchange = loadConfig
-$("#cfgReload").onclick = loadConfig
-async function loadConfig() {
-  try {
-    const data = await api("/api/config?file=" + encodeURIComponent($("#cfgFile").value))
-    $("#cfgText").value = data.content
-  } catch (e) { $("#cfgText").value = ""; toast(e.message) }
-}
-$("#cfgSave").onclick = async () => {
-  try {
-    const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ file: $("#cfgFile").value, content: $("#cfgText").value }) })
-    toast(data.note || "已保存")
-  } catch (e) { toast(e.message) }
-}
-
-/* logs */
-async function loadLogs() {
-  try {
-    const data = await api("/api/logs/files")
-    $("#logFile").innerHTML = data.files.map(f => `<option>${esc(f)}</option>`).join("")
-  } catch (e) { toast(e.message) }
-}
-$("#logLoad").onclick = async () => {
-  try {
-    const data = await api("/api/logs?file=" + encodeURIComponent($("#logFile").value) + "&tail=" + $("#logTail").value)
-    $("#logText").textContent = data.lines.join("\n")
-  } catch (e) { toast(e.message) }
-}
-$("#logLive").onclick = () => {
-  if (state.logTimer) { clearInterval(state.logTimer); state.logTimer = null; $("#logLive").textContent = "实时：关"; return }
-  $("#logText").textContent = "连接中…"
-  const es = new EventSource("/api/logs/stream?file=" + encodeURIComponent($("#logFile").value))
-  es.onmessage = ev => { const el = $("#logText"); el.textContent += (el.textContent ? "\n" : "") + ev.data; el.scrollTop = el.scrollHeight }
-  es.onerror = () => { $("#logText").textContent += "\n[连接断开]"; es.close() }
-  state.logES = es
-  $("#logLive").textContent = "实时：开"
-}
-
-/* materials */
-async function loadMaterials() {
-  try {
-    const data = await api("/api/materials?bot=" + encodeURIComponent(state.bot))
-    $("#matTable").innerHTML = "<tr><th>image_id</th><th>引用</th><th>复用次数</th><th>操作</th></tr>" +
-      (data.list || []).map(m => `<tr><td>${esc(m.image_id)}</td><td class="muted">${esc(m.url).slice(0,60)}…</td><td>${m.uses||0}</td><td><button class="danger" data-del="${esc(m.image_id)}">删除</button></td></tr>`).join("")
-    if (data.warning) toast(data.warning)
-    $("#matTable").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-      if (!confirm("删除素材 " + b.dataset.del + "？")) return
-      try { await api("/api/materials?bot=" + encodeURIComponent(state.bot) + "&id=" + encodeURIComponent(b.dataset.del), { method: "DELETE" }); loadMaterials() } catch (e) { toast(e.message) }
-    })
-  } catch (e) { toast(e.message) }
-}
-$("#matReload").onclick = loadMaterials
-
-/* groups */
-async function loadGroups() {
-  try {
-    const data = await api("/api/groups?bot=" + encodeURIComponent(state.bot))
-    state.groups = data.groups || []
-    $("#grpSel").innerHTML = state.groups.map(g => `<option value="${esc(g.group)}">${esc(g.name || g.group)}</option>`).join("") || "<option>无群</option>"
-    if (state.groups[0]) loadMembers(state.groups[0].group)
-  } catch (e) { toast(e.message) }
-}
-async function loadMembers(group) {
-  const q = new URLSearchParams({ bot: state.bot, group })
-  try {
-    const data = await api("/api/group/members?" + q)
-    const members = data.members || []
-    $("#memTable").innerHTML = "<tr><th>成员 openid</th><th>昵称</th><th>身份</th><th>操作</th></tr>" +
-      members.map(m => `<tr><td>${esc(m.member_openid || m.openid || m.user_id)}</td><td>${esc(m.username || m.nickname || "")}</td><td>${esc(m.member_role || m.role || "")}</td>
-      <td><button class="ghost" data-mute="${esc(m.member_openid || m.openid)}">禁言</button>
-      <button class="ghost" data-unmute="${esc(m.member_openid || m.openid)}">解除</button>
-      <button class="danger" data-kick="${esc(m.member_openid || m.openid)}">踢出</button></td></tr>`).join("")
-    $("#memTable").querySelectorAll("[data-mute],[data-unmute],[data-kick]").forEach(b => b.onclick = async () => {
-      const member = b.dataset.mute || b.dataset.unmute || b.dataset.kick
-      const action = b.dataset.mute ? "mute" : b.dataset.unmute ? "unmute" : "kick"
-      try { await api("/api/group/action", { method: "POST", body: JSON.stringify({ bot: state.bot, group, action, member, seconds: 600 }) }); toast("操作成功") } catch (e) { toast(e.message) }
-    })
-  } catch (e) { $("#memTable").innerHTML = `<tr><td style="color:#dc2626">${esc(e.message)}</td></tr>` }
-  loadBlacklist(group)
-}
-async function loadBlacklist(group) {
-  try {
-    const data = await api("/api/group/blacklist?" + new URLSearchParams({ bot: state.bot, group }))
-    const users = data.users || []
-    $("#blTable").innerHTML = "<tr><th>openid</th><th>昵称</th><th>操作</th></tr>" +
-      (users.map(u => `<tr><td>${esc(u.member_openid || u.openid)}</td><td>${esc(u.username || u.nickname || "")}</td><td><button class="danger" data-bl="${esc(u.member_openid || u.openid)}">移出</button></td></tr>`).join("") || "<tr><td colspan=3 class='muted'>暂无黑名单</td></tr>")
-    $("#blTable").querySelectorAll("[data-bl]").forEach(b => b.onclick = async () => {
-      try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group, op: "del", members: [b.dataset.bl] }) }); loadBlacklist(group) } catch (e) { toast(e.message) }
-    })
-  } catch (e) { $("#blTable").innerHTML = `<tr><td style="color:#dc2626">${esc(e.message)}</td></tr>` }
-}
-$("#blReload").onclick = () => loadBlacklist($("#grpSel").value)
-$("#blAdd").onclick = async () => {
-  const member = $("#blInput").value.trim(); if (!member) return
-  try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group: $("#grpSel").value, op: "add", members: [member] }) }); $("#blInput").value=""; loadBlacklist($("#grpSel").value) } catch (e) { toast(e.message) }
-}
-$("#blDel").onclick = async () => {
-  const member = $("#blInput").value.trim(); if (!member) return
-  try { await api("/api/group/blacklist", { method: "POST", body: JSON.stringify({ bot: state.bot, group: $("#grpSel").value, op: "del", members: [member] }) }); $("#blInput").value=""; loadBlacklist($("#grpSel").value) } catch (e) { toast(e.message) }
-}
-$("#grpReload").onclick = loadGroups
-$("#grpSel").onchange = () => loadMembers($("#grpSel").value)
-
-/* qq login */
-async function loadQQ() {
-  try {
-    const s = await api("/api/qq/status")
-    $("#qqStatus").textContent = s.loggedIn ? "已保存 Cookie" : "未登录"
-    $("#qqStatus").className = "pill " + (s.loggedIn ? "ok" : "bad")
-    $("#qqAt").textContent = s.at ? new Date(s.at).toLocaleString() : ""
-    if (s.loggedIn) loadQQBots()
-  } catch (e) { toast(e.message) }
-}
-async function loadQQBots() {
-  try {
-    const data = await api("/api/qq/bots")
-    const bots = data.bots || []
-    if (!bots.length) { $("#qqBots").innerHTML = "<div class='card muted'>该 QQ 名下没有机器人</div>"; return }
-    $("#qqBots").innerHTML = bots.map(b => `<div class="card" style="cursor:pointer${String(b.bot_appid)===String(state.appid)?';outline:2px solid #3b82f6':''}" data-appid="${esc(b.bot_appid)}" data-name="${esc(b.bot_name)}">
-      <div class="k">${esc(b.bot_uin)} · ${b.bot_status===1?"在线":"离线"}</div>
-      <div class="v" style="font-size:18px">${esc(b.bot_name)}</div>
-      <div class="k">${esc(b.bot_appid)} · ${b.statistics_data?.existing_groups||0} 群 / ${b.statistics_data?.stock_added_friends||0} 好友</div>
-    </div>`).join("")
-    $("#qqBots").querySelectorAll("[data-appid]").forEach(el => el.onclick = () => {
-      state.appid = el.dataset.appid; state.qqBotName = el.dataset.name
-      localStorage.setItem("qqbot_appid", state.appid); localStorage.setItem("qqbot_name", state.qqBotName)
-      toast("已选择机器人：" + state.qqBotName)
-      loadStats(state.range)
-    })
-  } catch (e) {
-    $("#qqBots").innerHTML = `<div class="card" style="color:#dc2626">${esc(e.message)}</div>`
-  }
-}
-$("#qqSave").onclick = async () => {
-  try { await api("/api/qq/cookie", { method: "POST", body: JSON.stringify({ cookie: $("#qqCookie").value }) }); toast("已保存"); loadQQ() } catch (e) { toast(e.message) }
-}
-$("#qqCheck").onclick = () => loadQQ()
-
-let qrTimer = null
-$("#qrStart").onclick = async () => {
-  try {
-    if (qrTimer) { clearInterval(qrTimer); qrTimer = null }
-    const data = await api("/api/qq/qr", { method: "POST", body: "{}" })
-    $("#qrImg").src = data.image
-    $("#qrImg").style.display = "block"
-    $("#qrMsg").textContent = "请用手机 QQ 扫码"
-    const started = Date.now()
-    qrTimer = setInterval(async () => {
-      if (Date.now() - started > 125000) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = "二维码已过期，请重新获取"; return }
-      try {
-        const s = await api("/api/qq/qr/status?id=" + encodeURIComponent(data.id))
-        $("#qrMsg").textContent = s.message || s.status
-        if (s.status === "success") {
-          clearInterval(qrTimer); qrTimer = null
-          $("#qrImg").style.display = "none"
-          toast("QQ 登录成功" + (s.nickname ? "：" + s.nickname : ""))
-          loadQQ(); loadQQBots()
-        }
-        if (s.status === "expired" || s.status === "error") { clearInterval(qrTimer); qrTimer = null }
-      } catch (e) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = e.message }
-    }, 2000)
-  } catch (e) { $("#qrMsg").textContent = e.message }
-}
-
-/* menu / panels */
-async function loadMenu() {
-  try {
-    const data = await api("/api/menu?bot=" + encodeURIComponent(state.bot))
-    $("#menuJson").value = data.menu ? JSON.stringify(data.menu, null, 2) : ""
-    const panels = data.panels || []
-    $("#panelTable").innerHTML = "<tr><th>panel_id</th><th>摘要</th><th>操作</th></tr>" +
-      (panels.map(p => `<tr><td>${esc(p.panel_id)}</td><td class="muted">${esc(JSON.stringify(p.panel || p).slice(0,80))}</td><td><button class="danger" data-panel="${esc(p.panel_id)}">删除</button></td></tr>`).join("") || "<tr><td colspan=3 class='muted'>暂无面板</td></tr>")
-    $("#panelTable").querySelectorAll("[data-panel]").forEach(b => b.onclick = async () => {
-      if (!confirm("删除指令面板 " + b.dataset.panel + "？")) return
-      try { await api("/api/panel?bot=" + encodeURIComponent(state.bot) + "&id=" + encodeURIComponent(b.dataset.panel), { method: "DELETE" }); loadMenu() } catch (e) { toast(e.message) }
-    })
-  } catch (e) { toast(e.message) }
-}
-$("#menuLoad").onclick = loadMenu
-$("#panelReload").onclick = loadMenu
-$("#menuSave").onclick = async () => {
-  try {
-    const menu = JSON.parse($("#menuJson").value || "{}")
-    await api("/api/menu", { method: "PUT", body: JSON.stringify({ bot: state.bot, menu }) })
-    $("#menuMsg").textContent = "已保存"
-  } catch (e) { $("#menuMsg").textContent = e.message }
-}
-$("#panelCreate").onclick = async () => {
-  try {
-    const panel = JSON.parse($("#panelJson").value || "{}")
-    await api("/api/panel", { method: "POST", body: JSON.stringify({ bot: state.bot, panel }) })
-    $("#panelMsg").textContent = "已创建"; loadMenu()
-  } catch (e) { $("#panelMsg").textContent = e.message }
-}
-
-/* boot */
-;(async () => {
-  try { await loadStatus(); loadStats("7d"); loadQQ() } catch (e) { if (e.message !== "未登录") toast(e.message) }
-})()
-</script>
 </body>
 </html>
