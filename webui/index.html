@@ -50,6 +50,8 @@ td .bar{min-width:80px}
     <p>密码在 TRSS 日志（logger.info）或 data/QQBot/webui.json 中</p>
     <input id="pwd" type="password" placeholder="输入密码" style="width:100%;margin-bottom:12px">
     <button id="loginBtn" style="width:100%">登录</button>
+    <button id="showPwd" class="ghost" style="width:100%;margin-top:8px">显示密码（冷却 30 秒）</button>
+    <p id="pwdTip" style="margin-top:8px;color:#2563eb;word-break:break-all"></p>
     <p id="loginErr" style="color:#dc2626;margin-top:10px"></p>
   </div>
 </div>
@@ -174,6 +176,26 @@ $("#loginBtn").onclick = async () => {
     await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#pwd").value }) })
     $("#login").style.display = "none"; location.reload()
   } catch (e) { $("#loginErr").textContent = e.message }
+}
+$("#showPwd").onclick = async () => {
+  const btn = $("#showPwd")
+  try {
+    const res = await fetch("/api/password", { method: "POST", credentials: "same-origin" })
+    const data = await res.json()
+    if (!res.ok) {
+      $("#pwdTip").textContent = data.error === "冷却中" ? `冷却中，请 ${data.wait} 秒后再试` : (data.error || "获取失败")
+      return
+    }
+    $("#pwdTip").textContent = "密码：" + data.password
+    btn.disabled = true
+    let left = data.cooldown || 30
+    btn.textContent = `冷却中 ${left}s`
+    const timer = setInterval(() => {
+      left--
+      if (left <= 0) { clearInterval(timer); btn.disabled = false; btn.textContent = "显示密码（冷却 30 秒）" }
+      else btn.textContent = `冷却中 ${left}s`
+    }, 1000)
+  } catch (e) { $("#pwdTip").textContent = e.message }
 }
 $("#logout").onclick = async () => { document.cookie = "qqbot_webui=; Max-Age=0; path=/"; location.reload() }
 

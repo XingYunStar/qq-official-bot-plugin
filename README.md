@@ -258,7 +258,7 @@ markdown:
 插件启动时会在 `2580` 端口启动 WebUI（可在 `config/QQBot.yaml` 的 `webui` 中修改）：
 
 - 地址：`http://<服务器IP>:2580/`
-- 密码：TRSS 启动日志里的 `[QQBot WebUI] 密码`（彩色 `logger.info`），同时保存在 `data/QQBot/webui.json`
+- 密码：TRSS 启动日志里的 `[QQBot WebUI] 密码`（彩色 `logger.info`），同时保存在 `data/QQBot/webui.json`；登录页也有「显示密码」按钮（30 秒冷却）
 - 功能：
   - 配置：编辑 `config/*.yaml` 与 `config/config/*.yaml`（含 QQBot.yaml、server.yaml、other.yaml），未上线机器人也可以先配置
   - 日志：历史日志查看、实时日志（SSE）

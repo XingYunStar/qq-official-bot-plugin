@@ -16,6 +16,7 @@ const AUTH_FILE = path.join(DATA_DIR, "webui.json")
 const STATS_API = "https://bot.q.qq.com/cgi-bin/v2/datareport/query"
 
 let running = null
+let passwordRevealAt = 0
 
 const json = (res, code, data) => {
   const body = JSON.stringify(data)
@@ -149,6 +150,18 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const html = await fs.readFile(htmlFile)
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
         return res.end(html)
+      }
+
+      if (pathname === "/api/password" && req.method === "POST") {
+        const authData = await auth
+        const now = Date.now()
+        if (now < passwordRevealAt)
+          return json(res, 429, {
+            error: "冷却中",
+            wait: Math.ceil((passwordRevealAt - now) / 1000),
+          })
+        passwordRevealAt = now + 30000
+        return json(res, 200, { password: authData.password, cooldown: 30 })
       }
 
       if (pathname === "/api/login" && req.method === "POST") {
