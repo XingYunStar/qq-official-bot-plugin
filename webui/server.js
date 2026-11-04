@@ -161,7 +161,9 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             wait: Math.ceil((passwordRevealAt - now) / 1000),
           })
         passwordRevealAt = now + 30000
-        return json(res, 200, { password: authData.password, cooldown: 30 })
+        logger.info(logger.magenta(`[QQBot WebUI] 登录密码：${authData.password}`))
+        logger.info(logger.magenta(`[QQBot WebUI] 密码文件：${path.resolve(AUTH_FILE)}`))
+        return json(res, 200, { ok: true, cooldown: 30, message: "密码已打印到 TRSS 日志" })
       }
 
       if (pathname === "/api/login" && req.method === "POST") {
