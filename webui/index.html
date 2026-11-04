@@ -147,6 +147,8 @@ td .bar{min-width:80px}
       <div class="row" style="justify-content:center"><button id="qrStart">扫码登录</button><span class="muted" id="qrMsg">未开始</span></div>
       <img id="qrImg" style="display:none;width:180px;height:180px;margin:12px auto 0" alt="QQ 登录二维码">
     </div>
+    <h2>选择机器人</h2>
+    <div class="grid cards" id="qqBots"><div class="card muted">登录后这里会列出该 QQ 名下的机器人</div></div>
     <h2>或粘贴 Cookie</h2>
     <div class="row"><span id="qqStatus" class="pill bad">未登录</span><span class="muted" id="qqAt"></span></div>
     <textarea id="qqCookie" style="min-height:120px;margin-top:12px" placeholder="uin=o...; skey=...; p_uin=...; pt4_token=..."></textarea>
@@ -158,7 +160,7 @@ td .bar{min-width:80px}
 <script>
 const $ = s => document.querySelector(s)
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))
-let state = { bots: [], bot: "", tab: "stats", logTimer: null, range: "7d" }
+let state = { bots: [], bot: "", appid: localStorage.getItem("qqbot_appid") || "", qqBotName: localStorage.getItem("qqbot_name") || "", tab: "stats", logTimer: null, range: "7d" }
 const toast = msg => { const t=$("#toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2200) }
 async function api(url, opts={}) {
   const res = await fetch(url, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts })
@@ -205,6 +207,7 @@ function rangeLabel(r){ return ({today:"今天",yesterday:"昨天","7d":"近 7 �
 async function loadStats(range, start, end) {
   state.range = range
   const q = new URLSearchParams({ bot: state.bot, range })
+  if (state.appid) q.set("appid", state.appid)
   if (start) q.set("start", start); if (end) q.set("end", end)
   $("#statCards").innerHTML = "<div class='card'>加载中…</div>"
   try {
@@ -341,7 +344,28 @@ async function loadQQ() {
     $("#qqStatus").textContent = s.loggedIn ? "已保存 Cookie" : "未登录"
     $("#qqStatus").className = "pill " + (s.loggedIn ? "ok" : "bad")
     $("#qqAt").textContent = s.at ? new Date(s.at).toLocaleString() : ""
+    if (s.loggedIn) loadQQBots()
   } catch (e) { toast(e.message) }
+}
+async function loadQQBots() {
+  try {
+    const data = await api("/api/qq/bots")
+    const bots = data.bots || []
+    if (!bots.length) { $("#qqBots").innerHTML = "<div class='card muted'>该 QQ 名下没有机器人</div>"; return }
+    $("#qqBots").innerHTML = bots.map(b => `<div class="card" style="cursor:pointer${String(b.bot_appid)===String(state.appid)?';outline:2px solid #3b82f6':''}" data-appid="${esc(b.bot_appid)}" data-name="${esc(b.bot_name)}">
+      <div class="k">${esc(b.bot_uin)} · ${b.bot_status===1?"在线":"离线"}</div>
+      <div class="v" style="font-size:18px">${esc(b.bot_name)}</div>
+      <div class="k">${esc(b.bot_appid)} · ${b.statistics_data?.existing_groups||0} 群 / ${b.statistics_data?.stock_added_friends||0} 好友</div>
+    </div>`).join("")
+    $("#qqBots").querySelectorAll("[data-appid]").forEach(el => el.onclick = () => {
+      state.appid = el.dataset.appid; state.qqBotName = el.dataset.name
+      localStorage.setItem("qqbot_appid", state.appid); localStorage.setItem("qqbot_name", state.qqBotName)
+      toast("已选择机器人：" + state.qqBotName)
+      loadStats(state.range)
+    })
+  } catch (e) {
+    $("#qqBots").innerHTML = `<div class="card" style="color:#dc2626">${esc(e.message)}</div>`
+  }
 }
 $("#qqSave").onclick = async () => {
   try { await api("/api/qq/cookie", { method: "POST", body: JSON.stringify({ cookie: $("#qqCookie").value }) }); toast("已保存"); loadQQ() } catch (e) { toast(e.message) }
@@ -366,7 +390,7 @@ $("#qrStart").onclick = async () => {
           clearInterval(qrTimer); qrTimer = null
           $("#qrImg").style.display = "none"
           toast("QQ 登录成功" + (s.nickname ? "：" + s.nickname : ""))
-          loadQQ()
+          loadQQ(); loadQQBots()
         }
         if (s.status === "expired" || s.status === "error") { clearInterval(qrTimer); qrTimer = null }
       } catch (e) { clearInterval(qrTimer); qrTimer = null; $("#qrMsg").textContent = e.message }

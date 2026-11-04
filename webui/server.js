@@ -420,11 +420,25 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           if (result.status === "success" && result.cookie) {
             authData.qqCookie = result.cookie
             authData.qqCookieAt = Date.now()
+            authData.qqDeveloper = result.developer || null
             await saveAuth(authData)
           }
           return json(res, 200, result)
         } catch (err) {
           return json(res, 400, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/qq/bots") {
+        if (!authData.qqCookie) return json(res, 401, { error: "请先登录 QQ 开放平台" })
+        try {
+          const { data } = await axios.get("https://bot.q.qq.com/cgi-bin/v2/info/list_bots", {
+            headers: { Cookie: authData.qqCookie },
+            timeout: 15000,
+          })
+          if (data?.retcode !== 0) return json(res, 400, { error: data?.msg || "获取机器人列表失败" })
+          return json(res, 200, { bots: data.data?.bots || [] })
+        } catch (err) {
+          return json(res, 500, { error: String(err.response?.data?.msg || err.message || err) })
         }
       }
       if (pathname === "/api/qq/status") {
