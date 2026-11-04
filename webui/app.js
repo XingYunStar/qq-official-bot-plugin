@@ -2,27 +2,27 @@
 const $ = s => document.querySelector(s)
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))
 function memberDisplayName(raw) {
-  const id = String(raw || "").replace(/^[^:]+:/, "")
+  const id = String(raw || "").replace(/^\d+[:_\uF03A]/, "")
   if (!id) return ""
   if (id === "all") return "全体成员"
-  const botId = String(state.bot || "").replace(/^[^:]+:/, "")
+  const botId = String(state.bot || "").replace(/^\d+[:_\uF03A]/, "")
   if (botId && id === botId) {
     const bot = (state.bots || []).find(x => [x.id, x.uin, x.appid].some(v => String(v || "") === botId))
     return bot?.name || state.qqBotName || ""
   }
   const member = (state.chatMembers || []).find(x =>
-    String(x.member_openid || x.openid || x.user_id || "").replace(/^[^:]+:/, "") === id
+    String(x.member_openid || x.openid || x.user_id || "").replace(/^\d+[:_\uF03A]/, "") === id
   )
   const name = member?.username || member?.nickname
-  if (name && name !== id && String(name).replace(/^[^:]+:/, "") !== id) return name
+  if (name && name !== id && String(name).replace(/^\d+[:_\uF03A]/, "") !== id) return name
   for (const m of state.chatMap?.values?.() || []) {
-    if (String(m.sender?.id || "").replace(/^[^:]+:/, "") === id) return m.sender?.name || ""
+    if (String(m.sender?.id || "").replace(/^\d+[:_\uF03A]/, "") === id) return m.sender?.name || ""
   }
   return ""
 }
 function resolveAtMentions(text) {
-  return String(text || "").replace(/@(?:(\d+):)?([A-Fa-f0-9]{8,})/g, (all, bot, id) => {
-    const name = memberDisplayName((bot ? bot + ":" : "") + id)
+  return String(text || "").replace(/@(?:(\d+)[:_\uF03A])?([A-Fa-f0-9]{8,})/g, (all, bot, id) => {
+    const name = memberDisplayName((bot ? bot + "_" : "") + id)
     return name ? "@" + name : all
   })
 }
@@ -948,8 +948,8 @@ function renderChatMembers(warning) {
     const msgRow = row.closest(".msg")
     const m = state.chatMap?.get(Number(msgRow?.dataset.mid))
     if (!m || m.direction === "out") return
-    const raw = String(m.sender?.id || "").replace(/^[^:]+:/, "")
-    const hit = list.find(x => String(x.member_openid || x.openid || x.user_id || "").replace(/^[^:]+:/, "") === raw)
+    const raw = String(m.sender?.id || "").replace(/^\d+[:_\uF03A]/, "")
+    const hit = list.find(x => String(x.member_openid || x.openid || x.user_id || "").replace(/^\d+[:_\uF03A]/, "") === raw)
     if (!hit) return
     if (!row.querySelector(".msg-role") && hit.member_role) {
       const tag = document.createElement("span")
@@ -1056,10 +1056,10 @@ function renderMentionBar() {
 }
 function setChatMention(member) {
   if (!member?.id) return
-  const id = String(member.id).replace(/^[^:]+:/, "")
+  const id = String(member.id).replace(/^\d+[:_\uF03A]/, "")
   if (!id) return
   const list = state.chatMentions ||= []
-  if (!list.some(m => String(m.id).replace(/^[^:]+:/, "") === id))
+  if (!list.some(m => String(m.id).replace(/^\d+[:_\uF03A]/, "") === id))
     list.push({ id, name: member.name || member.username || id })
   renderMentionBar()
 }
@@ -1302,8 +1302,8 @@ function appendChatMessage(m, live) {
   if (box.querySelector(".chat-empty")) box.innerHTML = ""
   const out = m.direction === "out"
   const name = m.sender?.name || (out ? "机器人" : "成员")
-  const rawSender = String(m.sender?.id || "").replace(/^[^:]+:/, "")
-  const known = state.chatMembers?.find(x => String(x.member_openid || x.openid || x.user_id).replace(/^[^:]+:/, "") === rawSender)
+  const rawSender = String(m.sender?.id || "").replace(/^\d+[:_\uF03A]/, "")
+  const known = state.chatMembers?.find(x => String(x.member_openid || x.openid || x.user_id).replace(/^\d+[:_\uF03A]/, "") === rawSender)
   const role = out ? "bot" : (m.sender?.role || known?.member_role || "")
   const roleText = out ? "机器人" : (role ? memberRoleLabel(role) : "")
   const time = new Date(m.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })

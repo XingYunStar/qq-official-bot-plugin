@@ -160,8 +160,8 @@ console.log("\n=== B. 群消息解析（真实 dispatchEvent） ===")
   const d = lastEvent("message.group.normal")?.data
   assert("触发 message.group.normal", !!d)
   assert("self_id 正确", d?.self_id === "10001")
-  assert("group_id 带前缀", d?.group_id === "10001:GROUP_1", d?.group_id)
-  assert("sender.user_id 带前缀", d?.sender?.user_id === "10001:USER_1", d?.sender?.user_id)
+  assert("group_id 带前缀", d?.group_id === "10001_GROUP_1", d?.group_id)
+  assert("sender.user_id 带前缀", d?.sender?.user_id === "10001_USER_1", d?.sender?.user_id)
   assert("消息元素已扁平化", d?.message?.[0]?.type === "at" && d.message[0].qq === "10001")
   assert("文本元素存在", d?.message?.some(i => i.type === "text" && i.text.includes("你好")))
   assert("未被重复插入自身 at", d?.message?.filter(i => i.type === "at" && i.qq === "10001").length === 1)
@@ -178,7 +178,7 @@ console.log("\n=== C. 私聊消息解析 ===")
   })
   const d = lastEvent("message.private.friend")?.data
   assert("触发 message.private.friend", !!d)
-  assert("私聊 user_id 带前缀", d?.sender?.user_id === "10001:USER_2", d?.sender?.user_id)
+  assert("私聊 user_id 带前缀", d?.sender?.user_id === "10001_USER_2", d?.sender?.user_id)
   assert("私聊消息类型", d?.message_type === "private" && d?.sub_type === "friend")
 }
 
@@ -253,7 +253,7 @@ console.log("\n=== D2. 群内全量消息（全量模式） ===")
     mentions: [{ id: "BOT_OPENID", username: "bot", bot: true }],
   })
   const d4 = [...events].reverse().find(i => i.data?.message_id === "msg-full-4")?.data
-  assert("仅有 group_openid 也能派发", d4?.group_id === "10001:GROUP_2", d4?.group_id)
+  assert("仅有 group_openid 也能派发", d4?.group_id === "10001_GROUP_2", d4?.group_id)
   assert("仅有 group_openid 时 at 正常", d4?.message?.some(i => i.type === "at" && i.qq === "10001"), JSON.stringify(d4?.message))
 
   // 4) 相同 msg_id 重复推送只处理一次
@@ -284,7 +284,7 @@ console.log("\n=== E. 发送消息元素转换（legacy 模式） ===")
     self_id: "10001",
     bot,
     group_id: "GROUP_1",
-    user_id: "10001:USER_1",
+    user_id: "10001_USER_1",
     message_id: "msg-1",
     time: Date.now() / 1000,
     _ret_id: [],
@@ -306,7 +306,7 @@ console.log("\n=== F. 引用回复 & 按钮转换 ===")
     self_id: "10001",
     bot,
     group_id: "GROUP_1",
-    user_id: "10001:USER_1",
+    user_id: "10001_USER_1",
     message_id: "msg-1",
     time: Date.now() / 1000,
     _ret_id: [],
@@ -397,21 +397,21 @@ console.log("\n=== J. 群管理 API & 通知事件 ===")
     approveJoinRequest: async (gid, uid, opts) => calls.push({ api: "approve", gid, uid, opts }),
   }
 
-  const group = adapter.pickGroup("10001", "10001:GROUP_1")
+  const group = adapter.pickGroup("10001", "10001_GROUP_1")
   assert("群信息可获取", (await group.getInfo()).group_name === "测试群")
   assert("机器人身份可获取", (await group.getBotState()).member_role === "admin")
 
-  await group.muteMember("10001:USER_1", 600)
+  await group.muteMember("10001_USER_1", 600)
   assert("禁言调用 setMemberMute", calls[0]?.api === "mute" && calls[0].arr[0].member_openid === "USER_1")
   assert("禁言到期时间为 ISO", /Z$/.test(calls[0].arr[0].mute_expire_at))
-  await group.muteMember("10001:USER_1", 0)
+  await group.muteMember("10001_USER_1", 0)
   assert("解除禁言使用 op=del", calls[1]?.arr?.[0]?.op === "del")
 
   await group.kickMember("USER_2", true)
   assert("踢人调用 removeMembers", calls[2]?.api === "kick" && calls[2].opts.member_openids[0] === "USER_2")
   assert("踢人可同时拉黑", calls[2].opts.add_to_member_blacklist === true)
 
-  const member = group.pickMember("10001:USER_1")
+  const member = group.pickMember("10001_USER_1")
   const info = await member.getInfo()
   assert("成员身份可获取", info.member_role === "owner" && info.username === "张三")
 
@@ -432,7 +432,7 @@ console.log("\n=== J. 群管理 API & 通知事件 ===")
   })
   await wait(20)
   const inc = lastEvent("notice.group.increase")
-  assert("进群通知已派发", inc?.data?.user_id === "10001:USER_NEW" && inc?.data?.group_id === "10001:GROUP_1", String(inc?.data?.user_id))
+  assert("进群通知已派发", inc?.data?.user_id === "10001_USER_NEW" && inc?.data?.group_id === "10001_GROUP_1", String(inc?.data?.user_id))
 
   // 入群申请通知
   bot.sdk.dispatchEvent("GROUP_JOIN_REQUEST", {
@@ -442,7 +442,7 @@ console.log("\n=== J. 群管理 API & 通知事件 ===")
   })
   await wait(20)
   const jr = lastEvent("notice.group.join_request")
-  assert("入群申请通知已派发", jr?.data?.user_id === "10001:USER_REQ" && jr?.data?.join_request_id === "jr1", String(jr?.data?.user_id))
+  assert("入群申请通知已派发", jr?.data?.user_id === "10001_USER_REQ" && jr?.data?.join_request_id === "jr1", String(jr?.data?.user_id))
 
   // 入群审批 API
   await bot.sdk.groupService.approveJoinRequest("GROUP_1", "USER_REQ", { op: "approve", join_request_id: "jr1" })
@@ -480,7 +480,7 @@ console.log("\n=== K. 链接模式 / 撤回判断 ===")
       self_id: "10001",
       bot,
       group_id: "GROUP_1",
-      user_id: "10001:U1",
+      user_id: "10001_U1",
       message_id: "m-own",
       time: Date.now() / 1000,
       _ret_id: [],
@@ -535,7 +535,7 @@ console.log("\n=== L. 群引用（msg_elements） ===")
     d?.message?.[0]?.type === "reply" && d.message[0].id === "msg-quoted",
     JSON.stringify(d?.message?.[0]),
   )
-  const cached = adapter.pickGroup("10001", "10001:GROUP_1").getMsg("msg-quoted")
+  const cached = adapter.pickGroup("10001", "10001_GROUP_1").getMsg("msg-quoted")
   assert("被引用消息可读取", String(cached?.raw_message || "").includes("原始消息"), String(cached?.raw_message))
 
   // 引用一条没有缓存过的消息：用引用索引兜底，也能读内容
@@ -560,7 +560,7 @@ console.log("\n=== L. 群引用（msg_elements） ===")
     d2?.message?.[0]?.type === "reply" && d2.message[0].id === "IDX_UNKNOWN",
     JSON.stringify(d2?.message?.[0]),
   )
-  const q2 = adapter.pickGroup("10001", "10001:GROUP_1").getMsg("IDX_UNKNOWN")
+  const q2 = adapter.pickGroup("10001", "10001_GROUP_1").getMsg("IDX_UNKNOWN")
   assert("未缓存的引用内容可读", q2?.raw_message === "没缓存过的内容", JSON.stringify(q2?.raw_message))
 }
 
@@ -652,7 +652,7 @@ console.log("\n=== M. 群引用发送 / 引用索引 ===")
     d?.message?.[0]?.type === "reply" && d.message[0].id === "ROBOT1.0_sent",
     JSON.stringify(d?.message?.[0]),
   )
-  assert("Robot 自己消息的引用内容可读", adapter.pickGroup("10001", "10001:GROUP_1").getMsg("ROBOT1.0_sent")?.raw_message === "机器人自己发的内容")
+  assert("Robot 自己消息的引用内容可读", adapter.pickGroup("10001", "10001_GROUP_1").getMsg("ROBOT1.0_sent")?.raw_message === "机器人自己发的内容")
 }
 
 console.log("\n=== N. 测试插件自动安装 ===")
@@ -693,6 +693,24 @@ console.log("\n=== O. master 使用说明 ===")
     )
 
     calls.length = 0
+    mainCfg.master["10001"] = ["10001_MASTER_OPENID"]
+    await adapter.sendExampleGuide()
+    assert(
+      "master 写成带前缀 ID 时仍用纯 openid 发送",
+      calls[0]?.uid === "MASTER_OPENID",
+      JSON.stringify(calls[0]?.uid),
+    )
+
+    calls.length = 0
+    mainCfg.master["10001"] = ["10001:10001_MASTER_OPENID"]
+    await adapter.sendExampleGuide()
+    assert(
+      "master 残留 bot: 双重前缀时仍用纯 openid 发送",
+      calls[0]?.uid === "MASTER_OPENID",
+      JSON.stringify(calls[0]?.uid),
+    )
+
+    calls.length = 0
     delete mainCfg.master["10001"]
     const none = await adapter.sendExampleGuide()
     assert("没有 master 时不发送", none === false && calls.length === 0)
@@ -701,6 +719,37 @@ console.log("\n=== O. master 使用说明 ===")
     Bot.uin.pop()
     delete mainCfg.master["10001"]
   }
+}
+
+console.log("\n=== O2. user_id 分隔符与旧格式兼容 ===")
+{
+  assert("分隔符在所有平台统一为下划线", adapter.sep === "_", adapter.sep)
+
+  const oldSep = "\uF03A" // 旧版 Windows 用的私用区字符
+  const cases = [
+    ["当前格式", "10001_USER_1"],
+    ["旧版非 Windows", "10001:USER_1"],
+    ["旧版 Windows", `10001${oldSep}USER_1`],
+  ]
+  for (const [name, id] of cases)
+    assert(`rawId 兼容${name}`, adapter.rawId(id) === "USER_1", `${id} -> ${adapter.rawId(id)}`)
+
+  assert("rawId 只剥一层", adapter.rawId("10001:10001_USER_1") === "10001_USER_1", adapter.rawId("10001:10001_USER_1"))
+  assert("rawId 不误伤纯 openid", adapter.rawId("USER_1") === "USER_1", adapter.rawId("USER_1"))
+  assert("rawId 不二次剥数字开头的 openid", adapter.rawId("10001_123_ABC") === "123_ABC", adapter.rawId("10001_123_ABC"))
+  assert("rawId 不二次剥频道 ID", adapter.rawId("qg_123_ABC") === "123_ABC", adapter.rawId("qg_123_ABC"))
+  assert("rawId 去掉频道 qg_ 前缀", adapter.rawId("qg_USER_1") === "USER_1", adapter.rawId("qg_USER_1"))
+  assert(
+    "stripSelfId 兼容旧分隔符",
+    adapter.stripSelfId(`10001${oldSep}USER_1`, "10001") === "USER_1",
+  )
+  assert("stripSelfId 不误伤无前缀 ID", adapter.stripSelfId("USER_1", "10001") === "USER_1")
+
+  const ctx = { self_id: "10001" }
+  const at = adapter.toSdkMessage([{ type: "at", user_id: "10001_USER_1" }], ctx)
+  assert("群 @ 元素输出纯 openid", at[0]?.data?.user_id === "USER_1", JSON.stringify(at[0]))
+  const atOld = adapter.toSdkMessage([{ type: "at", user_id: `10001${oldSep}USER_1` }], ctx)
+  assert("群 @ 兼容旧 Windows ID", atOld[0]?.data?.user_id === "USER_1", JSON.stringify(atOld[0]))
 }
 
 console.log("\n=== P. 频道 legacy multipart ===")

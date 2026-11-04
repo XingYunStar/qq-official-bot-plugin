@@ -947,7 +947,8 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const local = typeof adapter.groupChat?.members === "function" ? adapter.groupChat.members(id, group) : []
         const cache = adapter.memberCache
         const appid = Bot[id]?.info?.appid
-        const rawId = value => String(value || "").replace(/^[^:]+:/, "")
+        // 复用适配器的权威实现，避免这里再抄一份前缀正则
+        const rawId = value => adapter.rawId(value)
         const decorate = m => {
           const openid = rawId(m.member_openid || m.openid || m.user_id)
           const hit = openid && cache?.get ? cache.get(id, group, openid) : null
@@ -1062,7 +1063,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const images = Array.isArray(body.images) ? body.images.slice(0, 9) : []
         const reply = String(body.reply || "").trim()
         const rawMentions = Array.isArray(body.mentions) ? body.mentions : (body.mention ? [body.mention] : [])
-        const mentions = [...new Set(rawMentions.map(v => String(v || "").trim().replace(/^[^:]+:/, "")).filter(Boolean))]
+        const mentions = [...new Set(rawMentions.map(v => adapter.rawId(String(v || "").trim())).filter(Boolean))]
         if (!Bot[id]) return json(res, 400, { error: "机器人不在线或未配置" })
         if (!group) return json(res, 400, { error: "请选择群" })
         const msg = []

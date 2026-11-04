@@ -1,6 +1,9 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+/** 去掉 `机器人appid<sep>` 前缀；兼容历史分隔符 ":"、U+F03A 与当前 "_" */
+const stripIdPrefix = value => String(value ?? "").replace(/^\d+[:_\uF03A]/, "")
+
 /**
  * 群成员昵称/头像/身份缓存。
  * 官方成员列表不返回头像，头像主要来自消息事件；这里把消息里出现过的人和
@@ -16,7 +19,7 @@ export class MemberCache {
   }
 
   key(botId, groupId, userId) {
-    return `${botId}|${groupId}|${String(userId || "").replace(/^[^:]+:/, "")}`
+    return `${botId}|${groupId}|${stripIdPrefix(userId)}`
   }
 
   async load() {
@@ -48,7 +51,7 @@ export class MemberCache {
   }
 
   set(botId, groupId, userId, info = {}) {
-    const openid = String(userId || "").replace(/^[^:]+:/, "")
+    const openid = stripIdPrefix(userId)
     if (!openid) return
     const key = this.key(botId, groupId, openid)
     const old = this.entries.get(key) || {}

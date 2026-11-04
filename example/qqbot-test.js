@@ -16,8 +16,8 @@ const SKIP_PERMISSION_CHECK = false
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 const isQQBot = e => e?.bot?.adapter?.id === ADAPTER_ID || e?.adapter_id === ADAPTER_ID
-/** 去掉 `机器人QQ号:` 前缀 */
-const rawId = id => String(id ?? "").replace(/^\d+:/, "")
+/** 去掉 `机器人appid<sep>` 前缀；兼容历史分隔符 ":" / U+F03A 与当前 "_" */
+const rawId = id => String(id ?? "").replace(/^\d+[:_\uF03A]/, "")
 /** 取消息里 @ 的成员（排除 @全体 和频道用户） */
 const atMembers = e =>
   (e.message || []).filter(
@@ -25,7 +25,7 @@ const atMembers = e =>
       i.type === "at" &&
       i.qq &&
       i.qq !== "all" &&
-      !String(i.qq).endsWith(":all") &&
+      !/[:_\uF03A]all$/.test(String(i.qq)) &&
       !String(i.qq).startsWith("qg_") &&
       String(i.qq) !== String(e.self_id),
   )
