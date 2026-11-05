@@ -73,6 +73,24 @@ pnpm install
 1. 创建机器人
 2. 开发设置 → 得到 `机器人QQ号:AppID:AppSecret`
 
+### 3.1 通过 WebUI 配置上线机器人
+
+除了直接编辑 `config/QQBot.yaml`，也可以在 WebUI 里完成机器人上线配置：
+
+1. 打开 WebUI →「配置」
+2. 选择 `config/QQBot.yaml` →「可视化配置」
+3. 在「机器人账号」卡片点击「+ 添加机器人」
+4. 填写：
+   - 机器人 QQ 号
+   - AppID
+   - AppSecret
+   - 连接方式（WebSocket / WebHook）
+   - 群聊、频道私域开关
+5. 点击「保存配置」
+6. 重启 TRSS，让新增机器人连接生效
+
+表单里只编辑拆分后的字段，不直接显示最终 token 拼接字符串；保存后可以在「原始 YAML」里看到拼装出的 `token:` 行，方便核对或迁移。AppSecret 属于敏感信息，不要截图或分享配置。
+
 ### 4. 配置账号
 
 输入：
@@ -279,7 +297,7 @@ markdown:
 - **首次登录成功后必须设置自己的密码**；设置完成后不再打印初始密码
 - 功能：
   - 前端：`webui/index.html` + `webui/style.css` + `webui/app.js`（结构/样式/逻辑分离，改前端刷新即可，不用重启）
-  - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/Token），带字段校验并保留原有 YAML 结构；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
+  - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/机器人账号），带字段校验并保留原有 YAML 结构；机器人 Token 按账号拆分成分字段表单，保存时才拼装成 YAML 行；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
   - 日志：默认进入日志页即开始实时；hook 全局 `logger` 捕获所有插件日志，服务端按级别过滤并 220ms 批量推送；默认 INFO 及以上（隐藏 DEBUG/TRACE），可切全部/DEBUG/WARN/ERROR；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
   - 系统状态：负载（1/5/15）、CPU、GPU（nvidia-smi）、内存、SWAP、磁盘、网络速率/网卡、Node 内存、运行时间、机器人数，3 秒自动刷新
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）

@@ -421,7 +421,7 @@ function renderConfigForm(data) {
       <h3>基础</h3>
       ${configField("权限", "permission", data.permission ?? "master", "select", "", [["master", "master（主人）"], ["all", "all（所有人）"]])}
       ${configField("图片压缩阈值（MB）", "imageLength", data.imageLength ?? 3, "number", "0 表示不压缩")}
-      ${configField("二维码模式", "toQRCode", data.toQRCode === "link" ? "link" : data.toQRCode ? "true" : "false", "select", "", [["true", "直接二维码"], ["link", "链接"], ["false", "关闭"]])}
+      ${configField("二维码模式", "toQRCode", data.toQRCode === "link" ? "link" : (data.toQRCode === true || data.toQRCode === "true") ? "true" : "false", "select", "", [["true", "直接二维码"], ["link", "链接"], ["false", "关闭"]])}
       ${configField("回调按钮", "toCallback", !!data.toCallback, "checkbox")}
       ${configField("上传官方素材", "toBotUpload", !!data.toBotUpload, "checkbox")}
       ${configField("隐藏频道撤回提示", "hideGuildRecall", !!data.hideGuildRecall, "checkbox")}
@@ -455,12 +455,65 @@ function renderConfigForm(data) {
       ${mdRows || `<div class="muted" style="font-size:11px">暂无机器人 token</div>`}
     </div>
     <div class="config-card full">
-      <h3>机器人 Token</h3>
-      ${configField("每行一个", "token", (data.token || []).join("\n"), "textarea", "格式：机器人QQ号:AppID:AppSecret:Token:...；包含敏感信息，请勿分享配置截图")}
+      <h3>机器人账号</h3>
+      <p class="muted" style="font-size:10px;margin:0 0 10px">填写后由 WebUI 拼装成 token 行写入 YAML；表单里只编辑字段，不直接显示最终拼接字符串。</p>
+      <div id="tokenRows"></div>
+      <button class="ghost" type="button" id="tokenAdd" style="margin-top:4px">+ 添加机器人</button>
     </div>`
   $("#cfgForm").querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
   $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => el.addEventListener("change", () => { $("#cfgDirty").textContent = "未保存" }))
+  renderTokenRows(data.token)
 }
+function parseTokenFields(line) {
+  const p = String(line || "").split(":").map(x => x.trim())
+  if (p.length >= 6) return { id: p[0], appid: p[1], secret: p[3], mode: "ws", group: p[4] || "1", private: p[5] || "0" }
+  if (p.length === 5 && p[4] === "2") return { id: p[0], appid: p[1], secret: p[3], mode: "webhook", group: "0", private: "0" }
+  if (p.length === 5) return { id: p[0], appid: p[1], secret: p[2], mode: "ws", group: p[3] || "1", private: p[4] || "0" }
+  if (p.length === 4 && p[3] === "2") return { id: p[0], appid: p[1], secret: p[2], mode: "webhook", group: "0", private: "0" }
+  return { id: p[0] || "", appid: p[1] || "", secret: p[2] || "", mode: "ws", group: "1", private: "0" }
+}
+function tokenRowHtml(t = {}) {
+  return `<div class="token-row" data-token-row>
+    <div class="token-fields">
+      <label>机器人QQ号<input data-token="id" value="${esc(t.id || "")}" placeholder="例如 114514" inputmode="numeric"></label>
+      <label>AppID<input data-token="appid" value="${esc(t.appid || "")}" placeholder="开放平台 AppID"></label>
+      <label>AppSecret<input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="AppSecret" autocomplete="new-password"></label>
+      <label>连接方式<select data-token="mode"><option value="ws" ${t.mode !== "webhook" ? "selected" : ""}>WebSocket</option><option value="webhook" ${t.mode === "webhook" ? "selected" : ""}>WebHook</option></select></label>
+      <label class="token-flags">群聊<select data-token="group"><option value="1" ${t.group !== "0" ? "selected" : ""}>启用</option><option value="0" ${t.group === "0" ? "selected" : ""}>关闭</option></select></label>
+      <label class="token-flags">频道私域<select data-token="private"><option value="0" ${t.private !== "1" ? "selected" : ""}>关闭</option><option value="1" ${t.private === "1" ? "selected" : ""}>启用</option></select></label>
+    </div>
+    <button class="ghost token-del" type="button" title="删除这个机器人">删除</button>
+  </div>`
+}
+function renderTokenRows(tokens) {
+  const rows = Array.isArray(tokens) && tokens.length ? tokens.map(parseTokenFields) : [{}]
+  $("#tokenRows").innerHTML = rows.map(tokenRowHtml).join("")
+  const updateFlags = row => {
+    const webhook = row.querySelector('[data-token="mode"]').value === "webhook"
+    row.querySelectorAll(".token-flags").forEach(x => x.style.display = webhook ? "none" : "")
+  }
+  const setupRow = row => {
+    updateFlags(row)
+    row.querySelector('[data-token="mode"]').addEventListener("change", () => { updateFlags(row); $("#cfgDirty").textContent = "未保存" })
+    row.querySelectorAll("input,select").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
+  }
+  $("#tokenRows").querySelectorAll("[data-token-row]").forEach(setupRow)
+  $("#tokenAdd").onclick = () => {
+    $("#tokenRows").insertAdjacentHTML("beforeend", tokenRowHtml({ group: "1", private: "0" }))
+    const rows = $("#tokenRows").querySelectorAll("[data-token-row]")
+    const row = rows[rows.length - 1]
+    setupRow(row)
+    row.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }
+  $("#tokenRows").onclick = e => {
+    const btn = e.target.closest(".token-del")
+    if (!btn) return
+    if ($("#tokenRows").querySelectorAll("[data-token-row]").length <= 1) return toast("至少保留一个机器人账号")
+    btn.closest("[data-token-row]").remove()
+    $("#cfgDirty").textContent = "未保存"
+  }
+}
+
 function collectConfigForm() {
   const out = {}
   const set = (path, value) => {
@@ -475,12 +528,26 @@ function collectConfigForm() {
     else if (el.type === "number") value = Number(el.value)
     else if (el.dataset.path === "token") value = el.value.split("\n").map(x => x.trim()).filter(Boolean)
     else if (el.dataset.path === "markdown.template") value = el.value.split(",").map(x => x.trim()).filter(Boolean)
+    else if (el.dataset.path === "toQRCode") value = el.value === "true" ? true : el.value === "link" ? "link" : false
     else value = el.value
     set(el.dataset.path, value)
   })
   const markdown = out.markdown || {}
   $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => { markdown[el.dataset.mdBot] = el.value })
   if (Object.keys(markdown).length) out.markdown = markdown
+  const tokens = []
+  for (const row of $("#tokenRows").querySelectorAll("[data-token-row]")) {
+    const val = key => row.querySelector(`[data-token="${key}"]`)?.value?.trim() || ""
+    const id = val("id"), appid = val("appid"), secret = val("secret")
+    if (!id && !appid && !secret) continue
+    if (!/^\d{5,}$/.test(id)) throw new Error("机器人QQ号格式不正确：" + id)
+    if (!appid) throw new Error("AppID 不能为空")
+    if (!secret) throw new Error("AppSecret 不能为空")
+    const mode = val("mode")
+    tokens.push(mode === "webhook" ? `${id}:${appid}:${secret}:2` : `${id}:${appid}:${secret}:${val("group") || "1"}:${val("private") || "0"}`)
+  }
+  if (!tokens.length) throw new Error("至少配置一个机器人账号")
+  out.token = tokens
   return out
 }
 function setConfigMode(mode) {
