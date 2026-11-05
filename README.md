@@ -73,9 +73,16 @@ pnpm install
 1. 创建机器人
 2. 开发设置 → 得到 `机器人QQ号:AppID:AppSecret`
 
-### 3.1 通过 WebUI 配置上线机器人
+### 4. 配置账号
 
-除了直接编辑 `config/QQBot.yaml`，也可以在 WebUI 里完成机器人上线配置：
+有两种方式，**任选一种即可**：
+
+- 方式一：在 WebUI 里可视化配置
+- 方式二：在 QQ 里发送 `#QQBot设置` 指令
+
+#### 方式一：WebUI 可视化配置
+
+在 WebUI 里完成机器人上线配置，不需要手动编写 YAML：
 
 1. 打开 WebUI →「配置」
 2. 选择 `config/QQBot.yaml` →「可视化配置」
@@ -91,7 +98,7 @@ pnpm install
 
 表单里只编辑拆分后的字段，不直接显示最终 token 拼接字符串；AppSecret 支持「显示/隐藏」切换。保存后可以在「原始 YAML」里看到拼装出的 `token:` 行，方便核对或迁移。AppSecret 属于敏感信息，不要截图或分享配置。
 
-### 4. 配置账号
+#### 方式二：使用 `#QQBot设置` 指令
 
 输入：
 
