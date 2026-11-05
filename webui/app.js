@@ -477,7 +477,7 @@ function tokenRowHtml(t = {}) {
     <div class="token-fields">
       <label>机器人QQ号<input data-token="id" value="${esc(t.id || "")}" placeholder="例如 114514" inputmode="numeric"></label>
       <label>AppID<input data-token="appid" value="${esc(t.appid || "")}" placeholder="开放平台 AppID"></label>
-      <label>AppSecret<input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="AppSecret" autocomplete="new-password"></label>
+      <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="AppSecret" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
       <label>连接方式<select data-token="mode"><option value="ws" ${t.mode !== "webhook" ? "selected" : ""}>WebSocket</option><option value="webhook" ${t.mode === "webhook" ? "selected" : ""}>WebHook</option></select></label>
       <label class="token-flags">群聊<select data-token="group"><option value="1" ${t.group !== "0" ? "selected" : ""}>启用</option><option value="0" ${t.group === "0" ? "selected" : ""}>关闭</option></select></label>
       <label class="token-flags">频道私域<select data-token="private"><option value="0" ${t.private !== "1" ? "selected" : ""}>关闭</option><option value="1" ${t.private === "1" ? "selected" : ""}>启用</option></select></label>
@@ -495,6 +495,14 @@ function renderTokenRows(tokens) {
   const setupRow = row => {
     updateFlags(row)
     row.querySelector('[data-token="mode"]').addEventListener("change", () => { updateFlags(row); $("#cfgDirty").textContent = "未保存" })
+    const secret = row.querySelector('[data-token="secret"]')
+    const toggle = row.querySelector('.secret-toggle')
+    if (toggle) toggle.onclick = () => {
+      const show = secret.type === "password"
+      secret.type = show ? "text" : "password"
+      toggle.textContent = show ? "隐藏" : "显示"
+      toggle.setAttribute("aria-label", show ? "隐藏 AppSecret" : "显示 AppSecret")
+    }
     row.querySelectorAll("input,select").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
   }
   $("#tokenRows").querySelectorAll("[data-token-row]").forEach(setupRow)
