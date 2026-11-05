@@ -412,7 +412,7 @@ function configField(label, path, value, type = "text", hint = "", options = nul
   return `<div class="field${full}"><label>${esc(label)}</label>${control}${hint && type !== "checkbox" ? `<small>${esc(hint)}</small>` : ""}</div>`
 }
 function renderConfigForm(data) {
-  const botIds = (data.token || []).map(line => String(line).split(":")[0]).filter(Boolean)
+  const botIds = (data.token || []).map(line => parseTokenFields(line).id).filter(Boolean)
   const md = data.markdown || {}
   const modeOptions = [["raw", "raw（自动）"], ["inline", "inline（内联）"], ["legacy", "legacy（普通）"]]
   const mdRows = botIds.map(id => `<div class="md-mode-row"><code>${esc(id)}</code><select data-md-bot="${esc(id)}">${modeOptions.map(([v,t]) => `<option value="${v}" ${(md[id] || "raw") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>`).join("")
@@ -467,6 +467,8 @@ function renderConfigForm(data) {
 }
 function parseTokenFields(line) {
   const p = String(line || "").split(":").map(x => x.trim())
+  if (p.length === 2) return { id: "", appid: p[0], secret: p[1], mode: "ws", group: "1", private: "0" }
+  if (p.length === 3 && p[2] === "2") return { id: "", appid: p[0], secret: p[1], mode: "webhook", group: "0", private: "0" }
   if (p.length >= 6) return { id: p[0], appid: p[1], secret: p[3], mode: "ws", group: p[4] || "1", private: p[5] || "0" }
   if (p.length === 5 && p[4] === "2") return { id: p[0], appid: p[1], secret: p[3], mode: "webhook", group: "0", private: "0" }
   if (p.length === 5) return { id: p[0], appid: p[1], secret: p[2], mode: "ws", group: p[3] || "1", private: p[4] || "0" }
@@ -474,11 +476,11 @@ function parseTokenFields(line) {
   return { id: p[0] || "", appid: p[1] || "", secret: p[2] || "", mode: "ws", group: "1", private: "0" }
 }
 function tokenRowHtml(t = {}) {
-  return `<div class="token-row" data-token-row>
+  return `<div class="token-row" data-token-row data-qq="${esc(t.id || "")}" data-appid="${esc(t.appid || "")}">
     <div class="token-fields">
-      <label>机器人QQ号<input data-token="id" value="${esc(t.id || "")}" placeholder="例如 114514" inputmode="numeric"></label>
       <label>AppID<input data-token="appid" value="${esc(t.appid || "")}" placeholder="开放平台 AppID"></label>
       <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="32 位 AppSecret" minlength="32" maxlength="32" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
+      <label>机器人QQ（自动获取）<span class="resolved-wrap"><span class="resolved-qq" data-qq-label>${t.id ? esc(t.id) : "保存时自动获取"}</span><button class="token-resolve" type="button">获取</button></span></label>
       <label>连接方式<select data-token="mode"><option value="ws" ${t.mode !== "webhook" ? "selected" : ""}>WebSocket</option><option value="webhook" ${t.mode === "webhook" ? "selected" : ""}>WebHook</option></select></label>
       <label class="token-flags">群聊<select data-token="group"><option value="1" ${t.group !== "0" ? "selected" : ""}>启用</option><option value="0" ${t.group === "0" ? "selected" : ""}>关闭</option></select></label>
       <label class="token-flags">频道私域<select data-token="private"><option value="0" ${t.private !== "1" ? "selected" : ""}>关闭</option><option value="1" ${t.private === "1" ? "selected" : ""}>启用</option></select></label>
@@ -504,6 +506,28 @@ function renderTokenRows(tokens) {
       toggle.textContent = show ? "隐藏" : "显示"
       toggle.setAttribute("aria-label", show ? "隐藏 AppSecret" : "显示 AppSecret")
     }
+    const label = row.querySelector("[data-qq-label]")
+    const resolve = async () => {
+      const appid = row.querySelector('[data-token="appid"]').value.trim()
+      const pass = secret.value.trim()
+      if (!/^[A-Za-z0-9_-]+$/.test(appid)) throw new Error("AppID 格式不正确")
+      if (!/^[A-Za-z0-9]{32}$/.test(pass)) throw new Error("AppSecret 必须是 32 位字母或数字")
+      const data = await api("/api/bot/resolve", { method: "POST", body: JSON.stringify({ appid, secret: pass }) })
+      row.dataset.qq = data.qq
+      row.dataset.appid = appid
+      label.textContent = data.qq
+      $("#cfgDirty").textContent = "未保存"
+      return data
+    }
+    row.querySelector(".token-resolve").onclick = async () => {
+      try { const data = await resolve(); toast(`已获取机器人 QQ：${data.qq}`) } catch (e) { toast(e.message) }
+    }
+    row.querySelector('[data-token="appid"]').addEventListener("input", e => {
+      if (row.dataset.appid && e.target.value.trim() !== row.dataset.appid) {
+        row.dataset.qq = ""
+        label.textContent = "保存时自动获取"
+      }
+    })
     row.querySelectorAll("input,select").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
   }
   $("#tokenRows").querySelectorAll("[data-token-row]").forEach(setupRow)
@@ -523,7 +547,7 @@ function renderTokenRows(tokens) {
   }
 }
 
-function collectConfigForm() {
+async function collectConfigForm() {
   const out = {}
   const set = (path, value) => {
     const parts = path.split(".")
@@ -547,14 +571,20 @@ function collectConfigForm() {
   const tokens = []
   for (const row of $("#tokenRows").querySelectorAll("[data-token-row]")) {
     const val = key => row.querySelector(`[data-token="${key}"]`)?.value?.trim() || ""
-    const id = val("id"), appid = val("appid"), secret = val("secret")
-    if (!id && !appid && !secret) continue
-    if (!/^\d{5,}$/.test(id)) throw new Error("机器人QQ号格式不正确：" + id)
-    if (!appid) throw new Error("AppID 不能为空")
-    if (!secret) throw new Error("AppSecret 不能为空")
+    const appid = val("appid"), secret = val("secret")
+    if (!appid && !secret) continue
+    if (!/^[A-Za-z0-9_-]+$/.test(appid)) throw new Error("AppID 格式不正确：" + appid)
     if (!/^[A-Za-z0-9]{32}$/.test(secret)) throw new Error("AppSecret 必须是 32 位字母或数字")
+    let qq = row.dataset.qq
+    if (!qq || row.dataset.appid !== appid) {
+      const data = await api("/api/bot/resolve", { method: "POST", body: JSON.stringify({ appid, secret }) })
+      qq = data.qq
+      row.dataset.qq = qq
+      row.dataset.appid = appid
+      row.querySelector("[data-qq-label]").textContent = qq
+    }
     const mode = val("mode")
-    tokens.push(mode === "webhook" ? `${id}:${appid}:${secret}:2` : `${id}:${appid}:${secret}:${val("group") || "1"}:${val("private") || "0"}`)
+    tokens.push(mode === "webhook" ? `${qq}:${appid}:${secret}:2` : `${qq}:${appid}:${secret}:${val("group") || "1"}:${val("private") || "0"}`)
   }
   if (!tokens.length) throw new Error("至少配置一个机器人账号")
   out.token = tokens
@@ -606,7 +636,7 @@ $("#cfgForm").addEventListener("input", () => { $("#cfgDirty").textContent = "�
 $("#cfgSave").onclick = async () => {
   try {
     if (state.cfgMode === "form" && $("#cfgFile").value === CONFIG_FORM_FILE) {
-      const data = await api("/api/config/form", { method: "POST", body: JSON.stringify({ file: $("#cfgFile").value, values: collectConfigForm() }) })
+      const data = await api("/api/config/form", { method: "POST", body: JSON.stringify({ file: $("#cfgFile").value, values: await collectConfigForm() }) })
       $("#cfgDirty").textContent = ""
       toast(data.note || "已保存")
       loadConfig()
