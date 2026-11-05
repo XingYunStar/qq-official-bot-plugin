@@ -143,11 +143,16 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
   <section id="tab-config" class="hide">
     <div class="row">
       <select id="cfgFile"></select>
+      <div class="seg" id="cfgMode">
+        <button data-cfg-mode="form">可视化配置</button>
+        <button data-cfg-mode="raw">原始 YAML</button>
+      </div>
       <button class="ghost" id="cfgReload">重新读取</button>
-      <button id="cfgSave">保存</button>
+      <button id="cfgSave">保存配置</button>
       <span class="muted" id="cfgDirty"></span>
-      <span class="muted">保存后部分设置需要重启 TRSS；未上线机器人也可先配置。</span>
     </div>
+    <p class="muted" id="cfgHint">QQBot.yaml 推荐使用可视化配置；其他 YAML 文件使用原始 YAML 编辑。保存后部分设置需要重启 TRSS 生效。</p>
+    <div id="cfgForm" class="config-form hide"></div>
     <textarea id="cfgText" spellcheck="false" style="margin-top:12px"></textarea>
   </section>
 
