@@ -417,6 +417,12 @@ function renderConfigForm(data) {
   const modeOptions = [["raw", "raw（自动）"], ["inline", "inline（内联）"], ["legacy", "legacy（普通）"]]
   const mdRows = botIds.map(id => `<div class="md-mode-row"><code>${esc(id)}</code><select data-md-bot="${esc(id)}">${modeOptions.map(([v,t]) => `<option value="${v}" ${(md[id] || "raw") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>`).join("")
   $("#cfgForm").innerHTML = `
+    <div class="config-card full">
+      <h3>机器人账号</h3>
+      <p class="muted" style="font-size:10px;margin:0 0 10px">填写后由 WebUI 拼装成 token 行写入 YAML；表单里只编辑字段，不直接显示最终拼接字符串。</p>
+      <div id="tokenRows"></div>
+      <button class="ghost" type="button" id="tokenAdd" style="margin-top:4px">+ 添加机器人</button>
+    </div>
     <div class="config-card">
       <h3>基础</h3>
       ${configField("权限", "permission", data.permission ?? "master", "select", "", [["master", "master（主人）"], ["all", "all（所有人）"]])}
@@ -454,12 +460,7 @@ function renderConfigForm(data) {
       <div class="muted" style="font-size:10px;margin:8px 0">各机器人 Markdown 模式</div>
       ${mdRows || `<div class="muted" style="font-size:11px">暂无机器人 token</div>`}
     </div>
-    <div class="config-card full">
-      <h3>机器人账号</h3>
-      <p class="muted" style="font-size:10px;margin:0 0 10px">填写后由 WebUI 拼装成 token 行写入 YAML；表单里只编辑字段，不直接显示最终拼接字符串。</p>
-      <div id="tokenRows"></div>
-      <button class="ghost" type="button" id="tokenAdd" style="margin-top:4px">+ 添加机器人</button>
-    </div>`
+`
   $("#cfgForm").querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
   $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => el.addEventListener("change", () => { $("#cfgDirty").textContent = "未保存" }))
   renderTokenRows(data.token)
