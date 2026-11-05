@@ -279,7 +279,7 @@ markdown:
 - **首次登录成功后必须设置自己的密码**；设置完成后不再打印初始密码
 - 功能：
   - 前端：`webui/index.html` + `webui/style.css` + `webui/app.js`（结构/样式/逻辑分离，改前端刷新即可，不用重启）
-  - 配置：编辑 `config/*.yaml` 与 `config/config/*.yaml`（含 QQBot.yaml、server.yaml、other.yaml），未上线机器人也可以先配置
+  - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/Token），带字段校验并保留原有 YAML 结构；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
   - 日志：默认进入日志页即开始实时；hook 全局 `logger` 捕获所有插件日志，服务端按级别过滤并 220ms 批量推送；默认 INFO 及以上（隐藏 DEBUG/TRACE），可切全部/DEBUG/WARN/ERROR；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
   - 系统状态：负载（1/5/15）、CPU、GPU（nvidia-smi）、内存、SWAP、磁盘、网络速率/网卡、Node 内存、运行时间、机器人数，3 秒自动刷新
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）

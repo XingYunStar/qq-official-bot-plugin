@@ -394,21 +394,150 @@ document.querySelectorAll("[data-range]").forEach(b => b.onclick = () => loadSta
 $("#customRange").onclick = () => loadStats("custom", $("#start").value, $("#end").value)
 
 /* config */
-$("#cfgFile").onchange = loadConfig
-$("#cfgReload").onclick = loadConfig
+state.cfgMode = "form"
+state.cfgData = null
+const CONFIG_FORM_FILE = "config/QQBot.yaml"
+function configField(label, path, value, type = "text", hint = "", options = null) {
+  const full = type === "textarea" ? " full" : ""
+  let control
+  if (type === "checkbox") {
+    control = `<label class="switch"><input type="checkbox" data-path="${esc(path)}" ${value ? "checked" : ""}> ${esc(hint || "启用")}</label>`
+  } else if (type === "select") {
+    control = `<select data-path="${esc(path)}">${(options || []).map(([v, t]) => `<option value="${esc(v)}" ${String(value) === String(v) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`
+  } else if (type === "textarea") {
+    control = `<textarea data-path="${esc(path)}" spellcheck="false">${esc(value ?? "")}</textarea>`
+  } else {
+    control = `<input type="${type}" data-path="${esc(path)}" value="${esc(value ?? "")}">`
+  }
+  return `<div class="field${full}"><label>${esc(label)}</label>${control}${hint && type !== "checkbox" ? `<small>${esc(hint)}</small>` : ""}</div>`
+}
+function renderConfigForm(data) {
+  const botIds = (data.token || []).map(line => String(line).split(":")[0]).filter(Boolean)
+  const md = data.markdown || {}
+  const modeOptions = [["raw", "raw（自动）"], ["inline", "inline（内联）"], ["legacy", "legacy（普通）"]]
+  const mdRows = botIds.map(id => `<div class="md-mode-row"><code>${esc(id)}</code><select data-md-bot="${esc(id)}">${modeOptions.map(([v,t]) => `<option value="${v}" ${(md[id] || "raw") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>`).join("")
+  $("#cfgForm").innerHTML = `
+    <div class="config-card">
+      <h3>基础</h3>
+      ${configField("权限", "permission", data.permission ?? "master", "select", "", [["master", "master（主人）"], ["all", "all（所有人）"]])}
+      ${configField("图片压缩阈值（MB）", "imageLength", data.imageLength ?? 3, "number", "0 表示不压缩")}
+      ${configField("二维码模式", "toQRCode", data.toQRCode === "link" ? "link" : data.toQRCode ? "true" : "false", "select", "", [["true", "直接二维码"], ["link", "链接"], ["false", "关闭"]])}
+      ${configField("回调按钮", "toCallback", !!data.toCallback, "checkbox")}
+      ${configField("上传官方素材", "toBotUpload", !!data.toBotUpload, "checkbox")}
+      ${configField("隐藏频道撤回提示", "hideGuildRecall", !!data.hideGuildRecall, "checkbox")}
+      ${configField("自动安装测试插件", "autoInstallExample", !!data.autoInstallExample, "checkbox")}
+    </div>
+    <div class="config-card">
+      <h3>WebUI</h3>
+      ${configField("启用", "webui.enabled", data.webui?.enabled !== false, "checkbox")}
+      ${configField("监听地址", "webui.host", data.webui?.host || "0.0.0.0", "text", "默认 0.0.0.0")}
+      ${configField("端口", "webui.port", data.webui?.port || 2580, "number", "修改后需要重启 TRSS")}
+    </div>
+    <div class="config-card">
+      <h3>机器人</h3>
+      ${configField("沙箱模式", "bot.sandbox", !!data.bot?.sandbox, "checkbox")}
+      ${configField("最大重试", "bot.maxRetry", data.bot?.maxRetry === Infinity ? "Infinity" : (data.bot?.maxRetry ?? "Infinity"), "text", "数字或 Infinity")}
+      ${configField("请求超时（毫秒）", "bot.timeout", data.bot?.timeout ?? 30000, "number")}
+    </div>
+    <div class="config-card">
+      <h3>重连</h3>
+      ${configField("启用重连", "reconnect.enable", data.reconnect?.enable !== false, "checkbox")}
+      ${configField("初始间隔（毫秒）", "reconnect.interval", data.reconnect?.interval ?? 5000, "number")}
+      ${configField("最大间隔（毫秒）", "reconnect.maxInterval", data.reconnect?.maxInterval ?? 300000, "number")}
+      ${configField("最大重试次数", "reconnect.maxRetry", data.reconnect?.maxRetry ?? 0, "number", "0 表示不限")}
+      ${configField("心跳超时（毫秒）", "reconnect.heartbeatTimeout", data.reconnect?.heartbeatTimeout ?? 0, "number")}
+      ${configField("连接超时（毫秒）", "reconnect.connectTimeout", data.reconnect?.connectTimeout ?? 30000, "number")}
+    </div>
+    <div class="config-card full">
+      <h3>Markdown 模板</h3>
+      ${configField("模板变量 ID（逗号分隔）", "markdown.template", Array.isArray(md.template) ? md.template.join(", ") : (md.template || ""), "text", "例如：102145537_1767366896；留空则不使用模板")}
+      <div class="muted" style="font-size:10px;margin:8px 0">各机器人 Markdown 模式</div>
+      ${mdRows || `<div class="muted" style="font-size:11px">暂无机器人 token</div>`}
+    </div>
+    <div class="config-card full">
+      <h3>机器人 Token</h3>
+      ${configField("每行一个", "token", (data.token || []).join("\n"), "textarea", "格式：机器人QQ号:AppID:AppSecret:Token:...；包含敏感信息，请勿分享配置截图")}
+    </div>`
+  $("#cfgForm").querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
+  $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => el.addEventListener("change", () => { $("#cfgDirty").textContent = "未保存" }))
+}
+function collectConfigForm() {
+  const out = {}
+  const set = (path, value) => {
+    const parts = path.split(".")
+    let obj = out
+    for (let i = 0; i < parts.length - 1; i++) obj = obj[parts[i]] ||= {}
+    obj[parts.at(-1)] = value
+  }
+  $("#cfgForm").querySelectorAll("[data-path]").forEach(el => {
+    let value
+    if (el.type === "checkbox") value = el.checked
+    else if (el.type === "number") value = Number(el.value)
+    else if (el.dataset.path === "token") value = el.value.split("\n").map(x => x.trim()).filter(Boolean)
+    else if (el.dataset.path === "markdown.template") value = el.value.split(",").map(x => x.trim()).filter(Boolean)
+    else value = el.value
+    set(el.dataset.path, value)
+  })
+  const markdown = out.markdown || {}
+  $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => { markdown[el.dataset.mdBot] = el.value })
+  if (Object.keys(markdown).length) out.markdown = markdown
+  return out
+}
+function setConfigMode(mode) {
+  const isForm = mode === "form" && $("#cfgFile").value === CONFIG_FORM_FILE
+  state.cfgMode = isForm ? "form" : "raw"
+  $("#cfgForm").classList.toggle("hide", !isForm)
+  $("#cfgText").classList.toggle("hide", isForm)
+  $("#cfgMode").querySelectorAll("[data-cfg-mode]").forEach(b => b.classList.toggle("on", b.dataset.cfgMode === state.cfgMode))
+}
 async function loadConfig() {
+  const file = $("#cfgFile").value
+  const canForm = file === CONFIG_FORM_FILE
+  if (!canForm) state.cfgMode = "raw"
+  setConfigMode(state.cfgMode)
+  if (state.cfgMode === "form" && canForm) {
+    try {
+      const data = await api("/api/config/form?file=" + encodeURIComponent(file))
+      state.cfgData = data
+      renderConfigForm(data.data)
+      $("#cfgDirty").textContent = ""
+      return
+    } catch (e) {
+      toast(e.message)
+      state.cfgMode = "raw"
+      setConfigMode("raw")
+    }
+  }
   try {
-    const data = await api("/api/config?file=" + encodeURIComponent($("#cfgFile").value))
+    const data = await api("/api/config?file=" + encodeURIComponent(file))
     $("#cfgText").value = data.content
     $("#cfgDirty").textContent = ""
   } catch (e) { $("#cfgText").value = ""; $("#cfgDirty").textContent = ""; toast(e.message) }
 }
+$("#cfgFile").onchange = () => {
+  state.cfgMode = $("#cfgFile").value === CONFIG_FORM_FILE ? "form" : "raw"
+  loadConfig()
+}
+$("#cfgReload").onclick = loadConfig
+$("#cfgMode").querySelectorAll("[data-cfg-mode]").forEach(b => b.onclick = () => {
+  if (b.dataset.cfgMode === "form" && $("#cfgFile").value !== CONFIG_FORM_FILE) return toast("只有 QQBot.yaml 有可视化配置")
+  setConfigMode(b.dataset.cfgMode)
+  loadConfig()
+})
 $("#cfgText").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
+$("#cfgForm").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
 $("#cfgSave").onclick = async () => {
   try {
-    const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ file: $("#cfgFile").value, content: $("#cfgText").value }) })
-    $("#cfgDirty").textContent = ""
-    toast(data.note || "已保存")
+    if (state.cfgMode === "form" && $("#cfgFile").value === CONFIG_FORM_FILE) {
+      const data = await api("/api/config/form", { method: "POST", body: JSON.stringify({ file: $("#cfgFile").value, values: collectConfigForm() }) })
+      $("#cfgDirty").textContent = ""
+      toast(data.note || "已保存")
+      loadConfig()
+    } else {
+      const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ file: $("#cfgFile").value, content: $("#cfgText").value }) })
+      $("#cfgDirty").textContent = ""
+      toast(data.note || "已保存")
+    }
   } catch (e) { toast(e.message) }
 }
 
