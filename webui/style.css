@@ -563,3 +563,13 @@ body[data-tab="chat"]{background:var(--bg)}
 .md-mode-row code{font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--faint)}
 .md-mode-row select{width:110px;padding:5px 7px}
 @media(max-width:800px){.config-form{grid-template-columns:1fr}.config-card .field{grid-template-columns:1fr}.config-card .field>label{grid-column:1/-1}.config-card .field small{grid-column:1/-1}}
+
+/* ---------- token account form ---------- */
+#tokenRows{display:flex;flex-direction:column;gap:10px}
+.token-row{display:flex;gap:10px;align-items:flex-start;padding:11px;border:1px solid var(--line);border-radius:11px;background:rgba(148,163,184,.04)}
+.token-fields{display:grid;grid-template-columns:110px 150px minmax(150px,1fr) 105px 80px 90px;gap:8px;flex:1;min-width:0}
+.token-fields label{display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--muted);min-width:0}
+.token-fields input,.token-fields select{width:100%;padding:6px 8px;font-size:11px}
+.token-del{align-self:stretch;padding:4px 9px;font-size:10px;color:var(--bad);border-color:rgba(251,113,133,.25);background:rgba(251,113,133,.08)}
+@media(max-width:1100px){.token-row{flex-direction:column}.token-fields{width:100%;grid-template-columns:1fr 1fr}.token-del{align-self:flex-end}}
+@media(max-width:700px){.token-fields{grid-template-columns:1fr}}
