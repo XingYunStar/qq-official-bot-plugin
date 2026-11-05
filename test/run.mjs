@@ -993,6 +993,11 @@ console.log("\n=== T. 素材图生命周期 ===")
   )
   assert("上传后记录素材", adapter.materials[id].get("new-img") != null)
 
+  const goneErr = new Error('Request "/v2/media-images/x/delete" failed with code(40035008): markdown image not found')
+  assert("40035008 视为素材已不存在", adapter.isMaterialGone(goneErr), goneErr.message)
+  const goneErr2 = Object.assign(new Error("gone"), { response: { status: 404 } })
+  assert("404 视为素材已不存在", adapter.isMaterialGone(goneErr2), goneErr2.message)
+
   bot.sdk.deleteMaterialImage = oldDel
   bot.sdk.getMaterialImages = oldGet
   if (oldUpload) bot.sdk.uploadMaterialImage = oldUpload
