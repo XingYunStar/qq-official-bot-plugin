@@ -164,8 +164,9 @@ const adapter = new (class QQBotAdapter {
       this.toQRCodeRegExp = urlRegexSafe(config.toQRCode)
     }
 
+    // 外部 ID 统一使用 appid:openid。用户 ID 不作为文件名使用，Windows
+    // 也不需要替换分隔符；rawId/stripSelfId 仅兼容读取旧版 U+F03A / "_" 数据。
     this.sep = ":"
-    if (process.platform === "win32") this.sep = ""
     this.bind_user = {}
     this.appid = {}
     this.watcher = {}
@@ -236,8 +237,8 @@ const adapter = new (class QQBotAdapter {
           return { type, data: { id, event_id: data.event_id } }
         }
         case "at": {
-          // QQ 群 @ 的 user_id 是 openid，不能带 "机器人QQ:" 前缀
-          const userId = String(data.user_id ?? data.qq ?? "").replace(/^[^:]+:/, "")
+          // QQ 群 @ 的 user_id 是 openid，不能带 "机器人appid:" 前缀
+          const userId = this.rawId(data.user_id ?? data.qq ?? "")
           return { type, data: { ...data, user_id: userId } }
         }
         case "card": {
@@ -511,7 +512,7 @@ const adapter = new (class QQBotAdapter {
         msg.action.permission.specify_user_ids = []
         if (!Array.isArray(button.permission)) button.permission = [button.permission]
         for (const id of button.permission)
-          msg.action.permission.specify_user_ids.push(id.replace(`${data.self_id}${this.sep}`, ""))
+          msg.action.permission.specify_user_ids.push(this.stripSelfId(id, data.self_id))
       }
     }
     return msg
@@ -585,7 +586,7 @@ const adapter = new (class QQBotAdapter {
         case "at":
           if (i.qq === "all") content += "<qqbot-at-everyone />"
           else
-            content += `<qqbot-at-user id="${i.qq?.replace?.(`${data.self_id}${this.sep}`, "")}" />`
+            content += `<qqbot-at-user id="${this.stripSelfId(i.qq, data.self_id)}" />`
           break
         case "text":
           content += await this.makeRawMarkdownText(data, i.text, keyboard && button)
@@ -748,7 +749,7 @@ const adapter = new (class QQBotAdapter {
         case "at":
           if (i.qq === "all") content += "<qqbot-at-everyone />"
           else
-            content += `<qqbot-at-user id="${i.qq?.replace?.(`${data.self_id}${this.sep}`, "")}" />`
+            content += `<qqbot-at-user id="${this.stripSelfId(i.qq, data.self_id)}" />`
           break
         case "text": {
           const [text, temp] = this.makeMarkdownText(data, i.text, content)
@@ -853,7 +854,7 @@ const adapter = new (class QQBotAdapter {
 
       switch (i.type) {
         case "at":
-          //i.user_id = i.qq?.replace?.(`${data.self_id}${this.sep}`, "")
+          //i.user_id = this.stripSelfId(i.qq, data.self_id)
           continue
         case "text":
           if (!i.text || !i.text.trim()) continue
@@ -1006,7 +1007,7 @@ const adapter = new (class QQBotAdapter {
     return this.sendMsg(
       data,
       (msg, source) =>
-        data.bot.sdk.sendPrivateMessage(data.user_id, this.toSdkMessage(msg, data), source),
+        data.bot.sdk.sendPrivateMessage(this.rawId(data.user_id), this.toSdkMessage(msg, data), source),
       msg,
     )
   }
@@ -1023,7 +1024,7 @@ const adapter = new (class QQBotAdapter {
     for (const i of list) {
       if (!i || typeof i !== "object") continue
       if (i.type === "at") {
-        const id = String(i.user_id ?? i.qq ?? "").replace(/^[^:]+:/, "")
+        const id = this.rawId(i.user_id ?? i.qq ?? "")
         if (id === "all") parts.push("<qqbot-at-everyone />")
         else if (id) parts.push(`<qqbot-at-user id="${id}" />`)
       } else if (i.type === "text") parts.push(String(i.text || ""))
@@ -1309,7 +1310,7 @@ const adapter = new (class QQBotAdapter {
     Bot.makeLog("info", `撤回好友消息：[${data.user_id}] ${message_id}`, data.self_id)
     return this.recallMsg(
       data,
-      i => data.bot.sdk.recallPrivateMessage(data.user_id, i),
+      i => data.bot.sdk.recallPrivateMessage(this.rawId(data.user_id), i),
       message_id,
     )
   }
@@ -1353,7 +1354,7 @@ const adapter = new (class QQBotAdapter {
       ...Bot[id].fl.get(user_id),
       self_id: id,
       bot: Bot[id],
-      user_id: user_id.replace(`${id}${this.sep}`, ""),
+      user_id: this.stripSelfId(user_id, id),
     }
     return {
       ...i,
@@ -1374,8 +1375,8 @@ const adapter = new (class QQBotAdapter {
       ...Bot[id].gml.get(group_id)?.get(user_id),
       self_id: id,
       bot: Bot[id],
-      user_id: user_id.replace(`${id}${this.sep}`, ""),
-      group_id: group_id.replace(`${id}${this.sep}`, ""),
+      user_id: this.stripSelfId(user_id, id),
+      group_id: this.stripSelfId(group_id, id),
     }
     // 消息事件里的 author/mentions 自带 member_role，优先用缓存，避免受限接口
     const cached = Bot[id].gml.get(group_id)?.get(`${id}${this.sep}${i.user_id}`) || {}
@@ -1410,7 +1411,7 @@ const adapter = new (class QQBotAdapter {
       ...Bot[id].gl.get(group_id),
       self_id: id,
       bot: Bot[id],
-      group_id: group_id.replace(`${id}${this.sep}`, ""),
+      group_id: this.stripSelfId(group_id, id),
     }
     return {
       ...i,
@@ -1441,10 +1442,28 @@ const adapter = new (class QQBotAdapter {
     }
   }
 
-  /** 去掉 `机器人QQ号:` 前缀，拿到 QQ 平台的原始 id */
+  /**
+   * 去掉 `机器人appid:` 前缀，拿到 QQ 平台的原始 openid。
+   * 兼容历史分隔符："_"（旧 Windows 测试格式）、U+F03A（旧版 Windows 私用字符）。
+   * 只剥一层：openid 本身可能以「数字+分隔符」开头，多剥会把它吃掉；
+   * 频道 ID 只去 qg_ 标记，不再剥数字前缀。
+   * 需要剥「bot:appid:openid」双重前缀时用 sendExampleGuide 里的 normalizeMaster。
+   */
   rawId(id) {
-    if (typeof id !== "string") id = String(id)
-    return id.replace(/^\d+:/, "").replace(/^qg_/, "")
+    const value = String(id ?? "")
+    if (value.startsWith("qg_")) return value.slice(3)
+    return value.replace(/^\d+[:_\uF03A]/, "")
+  }
+
+  /** 去掉指定机器人的前缀；按 self_id 精确匹配，避免误伤 openid 本身 */
+  stripSelfId(id, self_id) {
+    const value = String(id ?? "")
+    if (!self_id) return value
+    for (const sep of new Set([this.sep, ":", "_", "\uF03A"])) {
+      const prefix = `${self_id}${sep}`
+      if (value.startsWith(prefix)) return value.slice(prefix.length)
+    }
+    return value
   }
 
   /**
@@ -2139,9 +2158,11 @@ const adapter = new (class QQBotAdapter {
     if (!this.groupChat || !data?.group_id || String(data.group_id).startsWith("qg_")) return
     try {
       const bot = Bot[data.self_id]
-      const groupId = String(data.group_id).includes(this.sep)
-        ? data.group_id
-        : `${data.self_id}${this.sep}${data.group_id}`
+      const rawGroup = String(data.group_id ?? "")
+      // 只认「数字 appid + 分隔符」前缀，避免 openid 里的历史分隔符被误判
+      const groupId = /^\d+[:_\uF03A]/.test(rawGroup)
+        ? rawGroup
+        : `${data.self_id}${this.sep}${rawGroup}`
       this.groupChat.add(data.self_id, groupId, {
         direction: "out",
         sender: {
@@ -3288,8 +3309,21 @@ const adapter = new (class QQBotAdapter {
     ].join("\n")
     for (const id of Bot.uin) {
       if (Bot[id]?.adapter !== this) continue
-      const masters = new Set((cfg.master?.[id] || []).map(String))
-      const targets = new Set(masters)
+      const masterList = cfg.master?.[id] || []
+      // master 可能写完整 e.user_id（appid:openid），甚至残留 "bot:" 前缀。
+      // 单聊接口要纯 openid：按 self_id 精确剥一次，剥完不要再剥。
+      const normalizeMaster = value => {
+        const raw = String(value ?? "")
+        const withoutBot = raw.startsWith(`${id}:`) ? raw.slice(id.length + 1) : raw
+        return this.stripSelfId(withoutBot, id)
+      }
+      // 判权用完整 e.user_id、通知用纯 openid，两种形态都收进 masters 才能匹配 real_id
+      const masters = new Set()
+      for (const value of masterList) {
+        masters.add(String(value))
+        masters.add(normalizeMaster(value))
+      }
+      const targets = new Set(masterList.map(normalizeMaster))
       try {
         for (const [openid, info] of Bot[id].fl || [])
           if (info?.real_id && masters.has(String(info.real_id))) targets.add(this.rawId(openid))
@@ -3304,7 +3338,7 @@ const adapter = new (class QQBotAdapter {
       }
       for (const uid of targets)
         try {
-          await Bot[id].sdk.sendPrivateMessage(this.rawId(uid), [
+          await Bot[id].sdk.sendPrivateMessage(uid, [
             { type: "text", data: { text } },
           ])
           sent = true

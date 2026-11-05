@@ -693,6 +693,24 @@ console.log("\n=== O. master 使用说明 ===")
     )
 
     calls.length = 0
+    mainCfg.master["10001"] = ["10001:MASTER_OPENID"]
+    await adapter.sendExampleGuide()
+    assert(
+      "master 写成带前缀 ID 时仍用纯 openid 发送",
+      calls[0]?.uid === "MASTER_OPENID",
+      JSON.stringify(calls[0]?.uid),
+    )
+
+    calls.length = 0
+    mainCfg.master["10001"] = ["10001:10001:MASTER_OPENID"]
+    await adapter.sendExampleGuide()
+    assert(
+      "master 残留 bot: 双重前缀时仍用纯 openid 发送",
+      calls[0]?.uid === "MASTER_OPENID",
+      JSON.stringify(calls[0]?.uid),
+    )
+
+    calls.length = 0
     delete mainCfg.master["10001"]
     const none = await adapter.sendExampleGuide()
     assert("没有 master 时不发送", none === false && calls.length === 0)
@@ -701,6 +719,37 @@ console.log("\n=== O. master 使用说明 ===")
     Bot.uin.pop()
     delete mainCfg.master["10001"]
   }
+}
+
+console.log("\n=== O2. user_id 分隔符与旧格式兼容 ===")
+{
+  assert("外部 ID 分隔符全平台为冒号", adapter.sep === ":", adapter.sep)
+
+  const oldSep = "\uF03A" // 旧版 Windows 用的私用区字符
+  const cases = [
+    ["当前格式", "10001:USER_1"],
+    ["旧版下划线", "10001_USER_1"],
+    ["旧版 Windows", `10001${oldSep}USER_1`],
+  ]
+  for (const [name, id] of cases)
+    assert(`rawId 兼容${name}`, adapter.rawId(id) === "USER_1", `${id} -> ${adapter.rawId(id)}`)
+
+  assert("rawId 只剥一层", adapter.rawId("10001:10001:USER_1") === "10001:USER_1", adapter.rawId("10001:10001:USER_1"))
+  assert("rawId 不误伤纯 openid", adapter.rawId("USER_1") === "USER_1", adapter.rawId("USER_1"))
+  assert("rawId 不二次剥数字开头的 openid", adapter.rawId("10001:123_ABC") === "123_ABC", adapter.rawId("10001:123_ABC"))
+  assert("rawId 不二次剥频道 ID", adapter.rawId("qg_123_ABC") === "123_ABC", adapter.rawId("qg_123_ABC"))
+  assert("rawId 去掉频道 qg_ 前缀", adapter.rawId("qg_USER_1") === "USER_1", adapter.rawId("qg_USER_1"))
+  assert(
+    "stripSelfId 兼容旧分隔符",
+    adapter.stripSelfId(`10001${oldSep}USER_1`, "10001") === "USER_1",
+  )
+  assert("stripSelfId 不误伤无前缀 ID", adapter.stripSelfId("USER_1", "10001") === "USER_1")
+
+  const ctx = { self_id: "10001" }
+  const at = adapter.toSdkMessage([{ type: "at", user_id: "10001:USER_1" }], ctx)
+  assert("群 @ 元素输出纯 openid", at[0]?.data?.user_id === "USER_1", JSON.stringify(at[0]))
+  const atOld = adapter.toSdkMessage([{ type: "at", user_id: `10001${oldSep}USER_1` }], ctx)
+  assert("群 @ 兼容旧 Windows ID", atOld[0]?.data?.user_id === "USER_1", JSON.stringify(atOld[0]))
 }
 
 console.log("\n=== P. 频道 legacy multipart ===")
