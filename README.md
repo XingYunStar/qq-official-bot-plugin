@@ -16,11 +16,11 @@
 
 <p align="center">
   <img src="docs/screenshots/chat.png" alt="群聊界面" width="49%">
-  <img src="docs/screenshots/system.png" alt="系统状态" width="49%">
+  <img src="docs/screenshots/config.png" alt="WebUI 配置页" width="49%">
 </p>
 
 <p align="center">
-  群聊实时消息、成员身份、引用/图片/文件卡片 · 系统负载、CPU、内存、SWAP、磁盘与网络状态
+  群聊实时消息、成员身份、引用/图片/文件卡片 · 可视化配置机器人账号（截图数据已脱敏）
 </p>
 
 ---
