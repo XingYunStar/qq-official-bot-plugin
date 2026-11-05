@@ -584,6 +584,60 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       }
 
       // ---- config ----
+      if (pathname === "/api/config/form" && req.method === "GET") {
+        const file = url.searchParams.get("file") || "config/QQBot.yaml"
+        if (file !== "config/QQBot.yaml") return json(res, 400, { error: "该文件只支持原始 YAML 编辑" })
+        try {
+          const raw = await fs.readFile(file, "utf8")
+          const doc = YAML.parseDocument(raw)
+          if (doc.errors?.length) throw doc.errors[0]
+          return json(res, 200, { file, data: doc.toJS() || {}, raw })
+        } catch (err) {
+          return json(res, 400, { error: String(err.message || err) })
+        }
+      }
+      if (pathname === "/api/config/form" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        if (body.file !== "config/QQBot.yaml") return json(res, 400, { error: "该文件只支持原始 YAML 编辑" })
+        const values = body.values && typeof body.values === "object" ? body.values : {}
+        if (values.webui?.port != null) {
+          const port = Number(values.webui.port)
+          if (!Number.isInteger(port) || port < 1 || port > 65535) return json(res, 400, { error: "WebUI 端口必须是 1-65535" })
+          values.webui.port = port
+        }
+        if (values.imageLength != null) {
+          const size = Number(values.imageLength)
+          if (!Number.isFinite(size) || size < 0) return json(res, 400, { error: "图片压缩阈值必须是非负数" })
+          values.imageLength = size
+        }
+        if (values.bot?.maxRetry != null) {
+          const rawRetry = String(values.bot.maxRetry).trim()
+          values.bot.maxRetry = rawRetry === "" || rawRetry === ".inf" || rawRetry === "Infinity" ? Infinity : Number(rawRetry)
+          if (!Number.isFinite(values.bot.maxRetry) && values.bot.maxRetry !== Infinity) return json(res, 400, { error: "bot.maxRetry 必须是数字或 Infinity" })
+        }
+        if (values.token != null && (!Array.isArray(values.token) || values.token.some(v => typeof v !== "string"))) return json(res, 400, { error: "token 必须是字符串数组" })
+        const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "webui", "bot", "reconnect", "markdown", "token"]
+        try {
+          const file = body.file
+          const raw = await fs.readFile(file, "utf8")
+          const doc = YAML.parseDocument(raw)
+          if (doc.errors?.length) throw doc.errors[0]
+          const current = doc.toJS() || {}
+          for (const key of allowed) {
+            if (!Object.prototype.hasOwnProperty.call(values, key)) continue
+            const value = values[key]
+            if (value && typeof value === "object" && !Array.isArray(value) && current[key] && typeof current[key] === "object" && !Array.isArray(current[key]))
+              doc.set(key, { ...current[key], ...value })
+            else doc.set(key, value)
+          }
+          const parsed = doc.toJS()
+          if (!parsed || typeof parsed !== "object") throw new Error("配置内容必须是对象")
+          await fs.writeFile(file, doc.toString(), "utf8")
+          return json(res, 200, { ok: true, note: "已保存；端口/机器人类配置需要重启 TRSS 后生效" })
+        } catch (err) {
+          return json(res, 400, { error: `保存失败：${err.message || err}` })
+        }
+      }
       if (pathname === "/api/config" && req.method === "GET") {
         const file = url.searchParams.get("file") || "config/QQBot.yaml"
         if (!(await configFiles()).includes(file)) return json(res, 400, { error: "不允许的文件" })
