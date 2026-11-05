@@ -108,7 +108,7 @@ SdkBot.prototype.getSelfInfo = async function () {
 }
 
 nodeModule.register(new URL("./hooks.mjs", import.meta.url).href)
-const { parseTokenLine, formatTokenLine } = await import("../components/token.js")
+const { parseTokenLine, formatTokenLine, parseCompactTokenLine } = await import("../components/token.js")
 await import("../index.js")
 
 const adapter = Bot.adapter[0]
@@ -1220,6 +1220,16 @@ console.log("\n=== Y. 账号配置新格式 ===")
     parseTokenLine("10001:123456:old-token:secret:2")?.secret === "secret",
   )
   assert("格式错误返回 null", parseTokenLine("10001:123456") === null)
+  const compact = parseCompactTokenLine("102000000:aBcDeFgHiJkLmNoPqRsTuVwXyZ123456")
+  assert(
+    "AppID+AppSecret 无 QQ 格式",
+    compact?.appid === "102000000" && compact?.secret.length === 32 && compact?.group === "1",
+    JSON.stringify(compact),
+  )
+  assert(
+    "AppID+AppSecret WebHook 格式",
+    parseCompactTokenLine("102000000:aBcDeFgHiJkLmNoPqRsTuVwXyZ123456:2")?.webhook === true,
+  )
   assert(
     "格式化去掉 Token",
     formatTokenLine(newLine) === "10001:123456:secret:1:0",

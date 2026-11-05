@@ -15,7 +15,7 @@ import { startWebUI, isWebUIInitialized } from "./webui/server.js"
 import { GroupStats } from "./components/group-stats.js"
 import { GroupChat, normalizeChatContent } from "./components/group-chat.js"
 import { MemberCache } from "./components/member-cache.js"
-import { parseTokenLine, formatTokenLine } from "./components/token.js"
+import { parseTokenLine, formatTokenLine, parseCompactTokenLine, fetchBotQQ } from "./components/token.js"
 import { normalizeCard, cardToText, splitCardMessages } from "./components/card.js"
 import QQBot from "qq-official-bot"
 import QQBotEd25519Module from "qq-official-bot/lib/ed25519.js"
@@ -3004,9 +3004,23 @@ const adapter = new (class QQBotAdapter {
         "error",
         "检测到已加载其他 QQBot 适配器（QQBot-Plugin），请只保留一个 QQBot 插件后再连接",
       )
-    const info = parseTokenLine(token)
+    let info = parseTokenLine(token)
     if (!info) {
-      Bot.makeLog("error", "账号配置格式错误：应为 机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域（或 :2 使用 WebHook）")
+      const compact = parseCompactTokenLine(token)
+      if (compact) {
+        try {
+          const bot = await fetchBotQQ(compact)
+          info = { ...compact, id: bot.id }
+          token = formatTokenLine(info)
+          Bot.makeLog("mark", `已通过 AppID 自动获取机器人 QQ：${bot.id}`, bot.id)
+        } catch (err) {
+          Bot.makeLog("error", ["自动获取机器人 QQ 失败", err?.message || err], compact.appid)
+          return false
+        }
+      }
+    }
+    if (!info) {
+      Bot.makeLog("error", "账号配置格式错误：应为 AppID:AppSecret、AppID:AppSecret:2（WebHook），或兼容格式 机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域")
       return false
     }
     const id = info.id
@@ -3419,22 +3433,48 @@ export class QQBotAdapter extends plugin {
 
   async Token() {
     const input = this.e.msg.replace(/^#[Qq]+[Bb]ot设置/, "").trim()
-    const info = parseTokenLine(input)
+    let info = parseTokenLine(input)
+    if (!info) {
+      const compact = parseCompactTokenLine(input)
+      if (compact) {
+        try {
+          const bot = await fetchBotQQ(compact)
+          info = { ...compact, id: bot.id }
+          this.reply(`已获取机器人 QQ：${bot.id}`, true)
+        } catch (err) {
+          this.reply(`获取机器人 QQ 失败：${err?.message || err}`, true)
+          return false
+        }
+      }
+    }
     if (!info)
       return this.reply(
         [
-          "格式错误，应为：",
-          "#QQBot设置机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域",
-          "#QQBot设置机器人QQ号:AppID:AppSecret:2（WebHook）",
+          "格式错误，应为以下任一种：",
+          "#QQBot设置AppID:AppSecret（自动获取机器人QQ）",
+          "#QQBot设置AppID:AppSecret:2（WebHook，自动获取机器人QQ）",
+          "#QQBot设置机器人QQ号:AppID:AppSecret:是否群Bot:是否频道私域（兼容旧格式）",
+          "#QQBot设置机器人QQ号:AppID:AppSecret:2（WebHook，兼容旧格式）",
         ].join("\n"),
         true,
       )
 
     const line = formatTokenLine(info)
-    const index = config.token.findIndex(item => parseTokenLine(item)?.id === info.id)
+    const index = config.token.findIndex(item => {
+      const existing = parseTokenLine(item)
+      if (existing) return existing.id === info.id
+      const compact = parseCompactTokenLine(item)
+      return compact?.appid === info.appid
+    })
     if (index >= 0) {
-      const existing = parseTokenLine(config.token[index])
-      if (existing && formatTokenLine(existing) === line) {
+      const raw = config.token[index]
+      const existing = parseTokenLine(raw)
+      const compact = existing ? null : parseCompactTokenLine(raw)
+      const same = existing
+        ? formatTokenLine(existing) === line
+        : compact && compact.appid === info.appid && compact.secret === info.secret &&
+          compact.webhook === info.webhook && compact.group === info.group && compact.private === info.private
+      if (same) {
         config.token.splice(index, 1)
         adapter.stopRetry(info.id)
         this.reply(`账号已删除，重启后生效，共${config.token.length}个账号`, true)

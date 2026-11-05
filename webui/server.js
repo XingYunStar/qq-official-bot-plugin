@@ -14,6 +14,7 @@ import YAML from "yaml"
 import axios from "axios"
 import { startQrLogin, pollQrLogin, selectDeveloper } from "../components/qqlogin.js"
 import { fetchStats } from "../model/stats.js"
+import { fetchBotQQ } from "../components/token.js"
 import { dayKey } from "../components/group-stats.js"
 
 const DATA_DIR = path.join("data", "QQBot")
@@ -584,6 +585,19 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       }
 
       // ---- config ----
+      if (pathname === "/api/bot/resolve" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        const appid = String(body.appid || "").trim()
+        const secret = String(body.secret || "").trim()
+        if (!/^[A-Za-z0-9_-]+$/.test(appid)) return json(res, 400, { error: "AppID 格式不正确" })
+        if (!secret) return json(res, 400, { error: "AppSecret 不能为空" })
+        try {
+          const bot = await fetchBotQQ({ appid, secret, timeout: 20000 })
+          return json(res, 200, { ok: true, qq: bot.id, username: bot.username })
+        } catch (err) {
+          return json(res, 400, { error: err?.message || String(err) })
+        }
+      }
       if (pathname === "/api/config/form" && req.method === "GET") {
         const file = url.searchParams.get("file") || "config/QQBot.yaml"
         if (file !== "config/QQBot.yaml") return json(res, 400, { error: "该文件只支持原始 YAML 编辑" })
