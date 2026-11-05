@@ -77,14 +77,14 @@ pnpm install
 
 有两种方式，**任选一种即可**：
 
-- 方式一：在 WebUI 里可视化配置
+- 方式一：在 [WebUI](https://github.com/XingYunStar/qq-official-bot-plugin#webui) 里可视化配置
 - 方式二：在 QQ 里发送 `#QQBot设置` 指令
 
 #### 方式一：WebUI 可视化配置
 
-在 WebUI 里完成机器人上线配置，不需要手动编写 YAML：
+在 [WebUI](https://github.com/XingYunStar/qq-official-bot-plugin#webui) 里完成机器人上线配置，不需要手动编写 YAML：
 
-1. 打开 WebUI →「配置」
+1. 打开 [WebUI](https://github.com/XingYunStar/qq-official-bot-plugin#webui) →「配置」
 2. 选择 `config/QQBot.yaml` →「可视化配置」
 3. 在「机器人账号」卡片点击「+ 添加机器人」
 4. 填写：
@@ -150,7 +150,7 @@ pnpm install
 
 ### 5. 发送图片 / MD 消息
 <details>
-<summary>不想用 MD 消息，或没有公网地址，可切换普通消息</summary>
+<summary>不想用 MD 消息，可切换普通消息</summary>
 
 
 ```
@@ -340,7 +340,7 @@ location /qqbot-webui/ {
 }
 ```
 
-也可以直接把宿主机 `2580` 端口映射到容器 `2580`。
+也可以直接把宿主机 `2580` 端口映射到TRSS容器 `2580`。
 
 ### QQ 开放平台登录
 
