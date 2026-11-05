@@ -1654,17 +1654,33 @@ const adapter = new (class QQBotAdapter {
     }
   }
 
+  materialErrorCode(err) {
+    return String(
+      err?.code ??
+      err?.errCode ??
+      err?.response?.data?.code ??
+      err?.response?.data?.errcode ??
+      err?.data?.code ??
+      ""
+    )
+  }
+
   isMaterialGone(err) {
-    const code = String(err?.code ?? err?.response?.data?.code ?? "")
-    return ["40035008", "40035009"].includes(code) || /不存在|已删除|已过期/.test(String(err?.message || ""))
+    const code = this.materialErrorCode(err)
+    const message = String(err?.message || "")
+    if (["40035008", "40035009"].includes(code)) return true
+    if (/4003500[89]/.test(message)) return true
+    if (err?.response?.status === 404) return true
+    return /not\s*found|不存在|已删除|已过期/i.test(message)
   }
 
   isMaterialLimitError(err) {
-    const code = String(err?.code ?? err?.response?.data?.code ?? "")
+    const code = this.materialErrorCode(err)
+    const message = String(err?.message || "")
     return (
       code === "40035007" ||
-      String(err?.message || "").includes("40035007") ||
-      /超过.*上限|数量.*上限/.test(String(err?.message || ""))
+      message.includes("40035007") ||
+      /超过.*上限|数量.*上限/.test(message)
     )
   }
 
