@@ -478,7 +478,7 @@ function tokenRowHtml(t = {}) {
     <div class="token-fields">
       <label>机器人QQ号<input data-token="id" value="${esc(t.id || "")}" placeholder="例如 114514" inputmode="numeric"></label>
       <label>AppID<input data-token="appid" value="${esc(t.appid || "")}" placeholder="开放平台 AppID"></label>
-      <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="AppSecret" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
+      <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="32 位 AppSecret" minlength="32" maxlength="32" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
       <label>连接方式<select data-token="mode"><option value="ws" ${t.mode !== "webhook" ? "selected" : ""}>WebSocket</option><option value="webhook" ${t.mode === "webhook" ? "selected" : ""}>WebHook</option></select></label>
       <label class="token-flags">群聊<select data-token="group"><option value="1" ${t.group !== "0" ? "selected" : ""}>启用</option><option value="0" ${t.group === "0" ? "selected" : ""}>关闭</option></select></label>
       <label class="token-flags">频道私域<select data-token="private"><option value="0" ${t.private !== "1" ? "selected" : ""}>关闭</option><option value="1" ${t.private === "1" ? "selected" : ""}>启用</option></select></label>
@@ -552,6 +552,7 @@ function collectConfigForm() {
     if (!/^\d{5,}$/.test(id)) throw new Error("机器人QQ号格式不正确：" + id)
     if (!appid) throw new Error("AppID 不能为空")
     if (!secret) throw new Error("AppSecret 不能为空")
+    if (!/^[A-Za-z0-9]{32}$/.test(secret)) throw new Error("AppSecret 必须是 32 位字母或数字")
     const mode = val("mode")
     tokens.push(mode === "webhook" ? `${id}:${appid}:${secret}:2` : `${id}:${appid}:${secret}:${val("group") || "1"}:${val("private") || "0"}`)
   }

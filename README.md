@@ -83,7 +83,7 @@ pnpm install
 4. 填写：
    - 机器人 QQ 号
    - AppID
-   - AppSecret
+   - AppSecret（32 位字母/数字）
    - 连接方式（WebSocket / WebHook）
    - 群聊、频道私域开关
 5. 点击「保存配置」
