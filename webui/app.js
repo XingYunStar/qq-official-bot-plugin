@@ -190,6 +190,20 @@ $("#botSel").onchange = () => { state.bot = $("#botSel").value }
 
 /* stats */
 function rangeLabel(r){ return ({today:"今天",yesterday:"昨天","7d":"近 7 天","14d":"近 14 天","30d":"近 30 天",month:"本月",total:"总览"})[r] || r }
+function fmtStatsDay(d) {
+  const s = String(d || "")
+  return /^\d{8}$/.test(s) ? `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}` : (s || "无")
+}
+function statsEmptyState(data, range) {
+  const reason = data.stale
+    ? `数据最后更新于 ${fmtStatsDay(data.lastDate)}，登录状态可能已过期，请重新登录 QQ 开放平台后刷新。`
+    : `官方尚未生成${rangeLabel(range)}的数据，请稍后刷新。`
+  return `<div class="card empty-state"><div class="empty-ico"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><div><strong>所选范围没有运营数据</strong><p>${esc(reason)}</p><button class="ghost" id="goQQ">去 QQ 登录</button></div></div>`
+}
+function wireStatsEmptyButton() {
+  const go = $("#goQQ")
+  if (go) go.onclick = () => document.querySelector('nav button[data-tab="qq"]')?.click()
+}
 function fmtPct(v) { return (Number(v || 0) * 100).toFixed(2) + "%" }
 function distCard(title, items) {
   const list = (items || []).slice().sort((a, b) => (b.ratio || 0) - (a.ratio || 0)).slice(0, 8)
@@ -210,6 +224,26 @@ async function loadStats(range, start, end) {
   try {
     const data = await api("/api/stats?" + q)
     const s = data.summary
+    const daily = data.daily || []
+    const updated = data.stale
+      ? `最后数据 ${fmtStatsDay(data.lastDate)}${data.apiError ? " · " + data.apiError : ""}`
+      : `更新于 ${new Date(data.updatedAt).toLocaleTimeString()}`
+    $("#statsTip").textContent = (data.limited || "") + " · " + rangeLabel(range) + (data.history ? ` · 本地 ${data.history.days || 0} 天` : "") + " · " + updated
+    $("#statsTip").classList.toggle("stats-warning", !!data.stale || !daily.length)
+    if (!daily.length) {
+      $("#statCards").innerHTML = statsEmptyState(data, range)
+      $("#metricCards").innerHTML = ""
+      $("#profileGrid").innerHTML = ""
+      $("#groupDistGrid").innerHTML = ""
+      $("#hotCommandsWrap").classList.add("hide")
+      $("#extraDataWrap").classList.add("hide")
+      $("#statTable").innerHTML = ""
+      state.statsRows = []
+      state.statsRaw = data
+      drawChart()
+      wireStatsEmptyButton()
+      return
+    }
     $("#statCards").innerHTML = [
       ["活跃用户", s.activeUsers, "人次"],
       ["消息量", s.messages, "条"],
@@ -257,9 +291,7 @@ async function loadStats(range, start, end) {
     if (extra.length) $("#extraData").innerHTML = extra.map(([name, rows]) => `
       <details class="card extra-card"><summary>${name} <span class="muted">${rows.length} 条</span></summary>
       <pre class="extra-json">${esc(JSON.stringify(rows, null, 2))}</pre></details>`).join("")
-    const hist = data.history ? ` · 本地 ${data.history.days || 0} 天` : ""
-    $("#statsTip").textContent = (data.limited || "") + " · " + rangeLabel(range) + hist + " · 更新于 " + new Date(data.updatedAt).toLocaleTimeString()
-    state.statsRows = data.daily || []
+    state.statsRows = daily
     state.statsRaw = data
     drawChart()
     const rows = (data.daily || []).slice().reverse()

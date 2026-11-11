@@ -617,3 +617,5 @@ body[data-tab="chat"]{background:var(--bg)}
 @media(max-width:1100px){.log-toolbar{grid-template-columns:1fr 1fr}.log-group:last-child{grid-column:1/-1}}
 @media(max-width:700px){.log-toolbar{grid-template-columns:1fr}.log-group:last-child{grid-column:auto}}
 
+
+#statsTip.stats-warning{color:var(--bad);background:rgba(251,113,133,.08);border:1px solid rgba(251,113,133,.2);border-radius:8px;padding:8px 10px}

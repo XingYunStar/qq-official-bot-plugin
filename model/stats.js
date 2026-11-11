@@ -133,18 +133,28 @@ export function summarize(rows) {
   }
 }
 
+export function localDayKey(time = Date.now()) {
+  const d = new Date(time)
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`
+}
+
 export function filterRows(rows, { range, start, end }) {
   let out = rows
   if (start || end)
     out = out.filter(
       r => (!start || r.date >= start.replace(/-/g, "")) && (!end || r.date <= end.replace(/-/g, "")),
     )
-  if (range === "month") {
+  const today = localDayKey()
+  if (range === "today") out = out.filter(r => r.date === today)
+  else if (range === "yesterday") out = out.filter(r => r.date === localDayKey(Date.now() - 24 * 60 * 60 * 1000))
+  else if (range === "7d" || range === "14d" || range === "30d") {
+    const days = Number(range.slice(0, -1))
+    const cutoff = localDayKey(Date.now() - (days - 1) * 24 * 60 * 60 * 1000)
+    out = out.filter(r => r.date >= cutoff && r.date <= today)
+  } else if (range === "month") {
     const month = String(new Date().getFullYear()) + String(new Date().getMonth() + 1).padStart(2, "0")
     out = out.filter(r => r.date.startsWith(month))
   }
-  if (range === "today") out = out.slice(-1)
-  else if (range === "yesterday") out = out.slice(-2, -1)
   return out
 }
 
@@ -176,6 +186,8 @@ export async function fetchStats({ appid, range = "7d", start = "", end = "", co
   }
   const rows = filterRows(allRows, { range, start, end })
   const last = rows[rows.length - 1] || {}
+  const lastDate = allRows[allRows.length - 1]?.date || ""
+  const stale = !data || (lastDate && lastDate < localDayKey(Date.now() - 24 * 60 * 60 * 1000))
   return {
     daily: rows,
     summary: summarize(rows),
@@ -194,5 +206,8 @@ export async function fetchStats({ appid, range = "7d", start = "", end = "", co
       days: allRows.length,
     },
     limited: "官方只提供最近 30 天；本地历史需要持续采集，范围越用越全",
+    stale,
+    apiError,
+    lastDate,
   }
 }
