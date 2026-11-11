@@ -638,7 +638,7 @@ Bot.on("notice.group.bot.increase", async e => {
   }
 })
 
-// 入群申请（需要机器人是管理员才会收到）
+// 入群申请（需要机器人是管理员，并且 WebSocket 订阅 GROUP_MEMBER / 1<<24）
 Bot.on("notice.group.join_request", e => {
   if (!isQQBot(e)) return
   logger.mark(

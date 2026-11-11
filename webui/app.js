@@ -432,6 +432,7 @@ function renderConfigForm(data) {
       ${configField("上传官方素材", "toBotUpload", !!data.toBotUpload, "checkbox")}
       ${configField("隐藏频道撤回提示", "hideGuildRecall", !!data.hideGuildRecall, "checkbox")}
       ${configField("自动安装测试插件", "autoInstallExample", !!data.autoInstallExample, "checkbox")}
+      ${configField("群成员/入群申请事件", "groupMemberEvent", data.groupMemberEvent !== false, "checkbox")}
     </div>
     <div class="config-card">
       <h3>WebUI</h3>

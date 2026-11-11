@@ -108,6 +108,7 @@ const { config, configSave } = await makeConfig(
     imageLength: 3,
     autoInstallExample: true,
     exampleGuideSent: false,
+    groupMemberEvent: true,
     webui: {
       enabled: true,
       port: 2580,
@@ -178,6 +179,8 @@ const adapter = new (class QQBotAdapter {
     this.materials = {}
     this.materialMd5 = {}
     this.materialMeta = {}
+    // GROUP_MEMBER intent 若平台未授权，运行期自动降级一次，避免反复 4014
+    this.groupMemberDenied = {}
     this.materialReady = {}
     this.materialTimer = {}
     this.materialSaveTimer = {}
@@ -2676,7 +2679,7 @@ const adapter = new (class QQBotAdapter {
       verify_info: event.verify_info,
       time: Number.isNaN(apply) ? Math.floor(Date.now() / 1000) : Math.floor(apply / 1000),
     }
-    Bot.makeLog("info", `入群申请：[${data.group_id}] ${event.username}(${data.user_id})`, id)
+    Bot.makeLog("mark", `入群申请：[${data.group_id}] ${event.username}(${data.user_id})`, id)
     return Bot.em("notice.group.join_request", data)
   }
 
@@ -3059,10 +3062,16 @@ const adapter = new (class QQBotAdapter {
       ],
     }
 
-    if (webhook || +info.group) opts.intents.push("GROUP_AND_C2C_EVENT")
+    const useGroupMember = +info.group && config.groupMemberEvent !== false && !this.groupMemberDenied[id]
+    if (webhook || +info.group) {
+      opts.intents.push("GROUP_AND_C2C_EVENT")
+      if (useGroupMember) opts.intents.push("GROUP_MEMBER")
+    }
 
     if (+info.private) opts.intents.push("GUILD_MESSAGES")
     else opts.intents.push("PUBLIC_GUILD_MESSAGES")
+
+    Bot.makeLog("mark", `WebSocket intents：${opts.intents.join(", ")}`, id)
 
     Bot[id] = {
       adapter: this,
@@ -3167,6 +3176,7 @@ const adapter = new (class QQBotAdapter {
     })
 
     this.installToken(id)
+    let close4014
 
     try {
       if (webhook) {
@@ -3175,10 +3185,39 @@ const adapter = new (class QQBotAdapter {
         Bot[id].logout = () => delete this.appid[opts.appid]
       }
 
-      await Bot[id].login()
+      const receiver = Bot[id].sdk.receiver
+      const onClose = code => {
+        if (code === 4014) close4014 = code
+      }
+      const loginTask = Promise.resolve(Bot[id].login())
+      loginTask.catch(() => {})
+      const denied = new Promise((_, reject) => {
+        receiver?.once?.("close", code => {
+          if (code === 4014) reject(Object.assign(new Error("GROUP_MEMBER intent 无权限（4014）"), { code: 4014 }))
+        })
+      })
+      receiver?.once?.("close", onClose)
+      try {
+        await Promise.race([loginTask, denied])
+      } finally {
+        receiver?.removeListener?.("close", onClose)
+      }
       await this.initMaterialManager(id)
       Object.assign(Bot[id].info, await Bot[id].sdk.getSelfInfo())
     } catch (err) {
+      if ((err?.code === 4014 || close4014 === 4014) && useGroupMember) {
+        this.groupMemberDenied[id] = true
+        Bot.makeLog(
+          "error",
+          "GROUP_MEMBER intent 无权限（4014），已自动关闭该 intent 并重新连接；入群申请可继续使用轮询兜底。确认开放平台已授予 GROUP_MEMBER_EVENT 权限后重启 TRSS 即可重试",
+          id,
+        )
+        this.token[id]?.dispose()
+        try {
+          await Bot[id]?.sdk?.stop?.()
+        } catch {}
+        return this.connect(token)
+      }
       Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)
       this.token[id]?.dispose()
       try {
