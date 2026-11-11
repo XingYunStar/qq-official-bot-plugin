@@ -75,13 +75,22 @@ async function ensureLogIndex(filePath) {
   return logIndexTasks.get(filePath)
 }
 
-async function readLogPage(filePath, { offset = 0, limit = 1000 } = {}) {
+async function readLogPage(filePath, { offset = 0, limit = 1000, center = null } = {}) {
   const index = await ensureLogIndex(filePath)
   const total = index.lineCount
   const max = Math.min(20000, Math.max(1, Number(limit) || 1000))
   const skip = Math.max(0, Number(offset) || 0)
-  const end = Math.max(0, total - skip)
-  const start = Math.max(0, end - max)
+  let end
+  let start
+  if (center !== null) {
+    const line = Math.min(Math.max(0, Number(center) || 0), Math.max(0, total - 1))
+    start = Math.max(0, line - Math.floor(max / 2))
+    end = Math.min(total, start + max)
+    start = Math.max(0, end - max)
+  } else {
+    end = Math.max(0, total - skip)
+    start = Math.max(0, end - max)
+  }
   let checkpoint = index.checkpoints[0]
   for (const cp of index.checkpoints) if (cp.line <= start) checkpoint = cp
   const lines = []
@@ -102,6 +111,31 @@ async function readLogPage(filePath, { offset = 0, limit = 1000 } = {}) {
 }
 
 /** 从文件尾部按块读取，足够行数就停止，避免大日志触发 Invalid string length */
+async function searchLogFile(filePath, query, { limit = 500, caseSensitive = false } = {}) {
+  const q = String(query || "").trim()
+  if (!q) throw new Error("搜索内容不能为空")
+  const needle = caseSensitive ? q : q.toLowerCase()
+  const max = Math.min(1000, Math.max(1, Number(limit) || 500))
+  const matches = []
+  let lineNo = 0
+  let found = 0
+  const stream = createReadStream(filePath, { encoding: "utf8" })
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+  try {
+    for await (const line of rl) {
+      lineNo++
+      const haystack = caseSensitive ? line : line.toLowerCase()
+      if (!haystack.includes(needle)) continue
+      found++
+      if (matches.length < max) matches.push({ line: lineNo, text: humanizeLogLine(line).slice(0, 600) })
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+  return { query: q, caseSensitive: !!caseSensitive, total: lineNo, found, matches, truncated: found > matches.length }
+}
+
 async function readLogTail(filePath, maxLines = 200) {
   const stat = await fs.stat(filePath)
   const handle = await fs.open(filePath, "r")
@@ -855,11 +889,21 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           return json(res, 404, { error: String(err.message || err) })
         }
       }
+      if (pathname === "/api/logs/search") {
+        const file = path.basename(url.searchParams.get("file") || "error.log")
+        const query = url.searchParams.get("q") || ""
+        const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit")) || 500))
+        const caseSensitive = url.searchParams.get("case") === "1"
+        if (!query.trim()) return json(res, 400, { error: "搜索内容不能为空" })
+        try { return json(res, 200, { file, ...await searchLogFile(path.join("logs", file), query, { limit, caseSensitive }) }) }
+        catch (err) { return json(res, 404, { error: String(err.message || err) }) }
+      }
       if (pathname === "/api/logs/page") {
         const file = path.basename(url.searchParams.get("file") || "error.log")
         const limit = Math.min(20000, Math.max(1, Number(url.searchParams.get("limit")) || 1000))
         const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0)
-        try { return json(res, 200, await readLogPage(path.join("logs", file), { offset, limit })) }
+        const center = url.searchParams.has("center") ? Math.max(0, Number(url.searchParams.get("center")) || 0) : null
+        try { return json(res, 200, await readLogPage(path.join("logs", file), { offset, limit, center })) }
         catch (err) { return json(res, 404, { error: String(err.message || err) }) }
       }
       if (pathname === "/api/logs/stream") {

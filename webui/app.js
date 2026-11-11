@@ -78,6 +78,7 @@ let state = {
   chatRefreshTimer: null, chatGroupsSig: "", chatMembersSig: "",
   logLevel: localStorage.getItem("qqbot_log_level") || "info", logRenderTimer: null, logRenderScroll: false,
   logWindowStart: 0, logWindowEnd: 0, logWindowTotal: 0, logWindowMode: "none", logWindowLoading: false,
+  logHighlightQuery: "", logFocusLine: -1, logSearching: false,
   errorCode: "all", errorCodes: [], errorLimit: 200, errorEntries: [], errorOffset: 0, errorHasMore: false, errorTotal: 0,
   chatMembers: [], chatMembersLocalOnly: false, chatBotRole: "", chatReply: null, chatMentions: [], chatMap: new Map(),
 }
@@ -784,11 +785,10 @@ function logClass(line) {
 }
 function renderLogs(scroll = false) {
   const el = $("#logText")
-  const q = ($("#logSearch")?.value || "").trim()
   const min = LOG_MIN[state.logLevel] ?? 2
   let items = state.logLines.map((line, index) => ({ line, abs: state.logWindowStart + index }))
-    .filter(item => logLevelOf(item.line) >= min)
-  if (q) items = items.filter(item => item.line.toLowerCase().includes(q.toLowerCase()))
+    .filter(item => logLevelOf(item.line) >= min || item.abs === state.logFocusLine)
+  const q = state.logHighlightQuery
   const re = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig") : null
   el.innerHTML = items.map(({ line, abs }) => {
     let html = esc(line) || " "
@@ -796,6 +796,81 @@ function renderLogs(scroll = false) {
     return `<span data-log-line="${abs}" class="${logClass(line)}">${html}</span>`
   }).join("\n")
   if (scroll) el.scrollTop = el.scrollHeight
+}
+function scrollToLogLine(abs) {
+  const el = $("#logText")
+  const span = el.querySelector(`span[data-log-line="${abs}"]`)
+  if (!span) return
+  const top = span.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+  el.scrollTop = Math.max(0, top - el.clientHeight / 2 + span.offsetHeight / 2)
+}
+function closeLogSearch(keepQuery = false) {
+  $("#logSearchPanel").classList.add("hide")
+  if (!keepQuery) {
+    state.logHighlightQuery = ""
+    state.logFocusLine = -1
+    $("#logSearch").value = ""
+    renderLogs()
+  }
+}
+function renderLogSearchResults(data) {
+  const panel = $("#logSearchPanel")
+  panel.classList.remove("hide")
+  const q = data.query || ""
+  $("#logSearchTitle").textContent = q
+    ? `“${q}” · 找到 ${data.found || 0} 条${data.truncated ? `（仅显示前 ${data.matches?.length || 0} 条）` : ""} · 共扫描 ${data.total || 0} 行`
+    : "全文件搜索结果"
+  const rows = data.matches || []
+  if (!rows.length) {
+    $("#logSearchResults").innerHTML = `<div class="muted" style="padding:14px">整个文件没有匹配内容</div>`
+    return
+  }
+  $("#logSearchResults").innerHTML = rows.map(m => `<button class="log-search-result" data-log-line="${m.line}"><span class="ln">${m.line}</span><span class="tx">${esc(m.text || "")}</span></button>`).join("")
+}
+async function searchLogs() {
+  const file = $("#logFile").value
+  const q = $("#logSearch").value.trim()
+  if (!file) return toast("请先选择日志文件")
+  if (!q) return toast("请输入要搜索的内容")
+  if (state.logSearching) return
+  state.logSearching = true
+  $("#logSearchBtn").disabled = true
+  $("#logSearchPanel").classList.remove("hide")
+  $("#logSearchTitle").textContent = `正在扫描整个 ${file}…`
+  $("#logSearchResults").innerHTML = `<div class="muted" style="padding:14px">全文件扫描中，10M 行日志可能需要几秒…</div>`
+  try {
+    const data = await api(`/api/logs/search?file=${encodeURIComponent(file)}&q=${encodeURIComponent(q)}&case=${$("#logSearchCase").checked ? 1 : 0}`)
+    renderLogSearchResults(data)
+  } catch (e) {
+    $("#logSearchTitle").textContent = `搜索失败：${e.message}`
+    $("#logSearchResults").innerHTML = ""
+  } finally {
+    state.logSearching = false
+    $("#logSearchBtn").disabled = false
+  }
+}
+async function openLogSearchHit(line, query) {
+  stopLogLive()
+  const file = $("#logFile").value
+  state.logHighlightQuery = query
+  state.logFocusLine = line - 1
+  $("#logStatus").textContent = `正在打开第 ${line} 行…`
+  try {
+    const data = await api(`/api/logs/page?file=${encodeURIComponent(file)}&center=${line - 1}&limit=${LOG_WINDOW_MAX}`)
+    state.logLines = data.lines || []
+    state.logWindowStart = data.start || 0
+    state.logWindowEnd = data.end || 0
+    state.logWindowTotal = data.total || 0
+    state.logWindowMode = "window"
+    state.logPaused = false
+    $("#logPause").disabled = true
+    renderLogs()
+    updateLogWindowStatus()
+    scrollToLogLine(line - 1)
+  } catch (e) {
+    $("#logStatus").textContent = `打开失败：${e.message}`
+    toast(e.message)
+  }
 }
 function captureLogAnchor() {
   const el = $("#logText")
@@ -837,6 +912,7 @@ function updateLogWindowStatus(extra = "") {
 }
 async function loadInitialLog() {
   stopLogLive()
+  closeLogSearch()
   state.logWindowMode = "window"
   state.logWindowLoading = true
   const file = $("#logFile").value
@@ -927,7 +1003,15 @@ $("#logText").onscroll = () => {
 }
 $("#logLoad").onclick = loadInitialLog
 $("#logFile").onchange = loadInitialLog
-$("#logSearch").oninput = () => renderLogs()
+$("#logSearchBtn").onclick = searchLogs
+$("#logSearch").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); searchLogs() } }
+$("#logSearchClear").onclick = () => { closeLogSearch(); $("#logSearchPanel").classList.add("hide") }
+$("#logSearchClose").onclick = () => closeLogSearch()
+$("#logSearchResults").onclick = e => {
+  const row = e.target.closest("[data-log-line]")
+  if (!row) return
+  openLogSearchHit(Number(row.dataset.logLine), $("#logSearch").value.trim())
+}
 $("#logPause").onclick = () => {
   state.logPaused = !state.logPaused
   $("#logPause").classList.toggle("on", state.logPaused)
@@ -972,6 +1056,7 @@ function pushLogLines(lines) {
 function startLogLive() {
   if (state.logES) return
   state.logLines = []
+  closeLogSearch()
   state.logWindowMode = "live"
   renderLogs()
   const es = new EventSource(`/api/logs/live?level=${encodeURIComponent(state.logLevel)}`)
