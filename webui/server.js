@@ -111,30 +111,75 @@ async function readLogPage(filePath, { offset = 0, limit = 1000, center = null }
 }
 
 /** 从文件尾部按块读取，足够行数就停止，避免大日志触发 Invalid string length */
+async function scanLinesWithOffsets(filePath, onLine, { signal } = {}) {
+  const stat = await fs.stat(filePath)
+  const stream = createReadStream(filePath)
+  let carry = Buffer.alloc(0)
+  let carryStart = 0
+  let lineNo = 0
+  let completeLines = 0
+  const checkpoints = [{ line: 0, offset: 0 }]
+  try {
+    for await (const chunk of stream) {
+      if (signal?.aborted) break
+      const data = carry.length ? Buffer.concat([carry, chunk]) : chunk
+      let start = 0
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] !== 10) continue
+        const raw = data.subarray(start, i)
+        const offset = carryStart + start
+        lineNo++
+        completeLines = lineNo
+        if (lineNo % LOG_LINE_STEP === 0) checkpoints.push({ line: lineNo, offset })
+        onLine(lineNo, raw.toString("utf8").replace(/\r$/, ""), offset)
+        start = i + 1
+      }
+      carryStart += start
+      carry = data.subarray(start)
+    }
+    if (carry.length && !signal?.aborted) {
+      lineNo++
+      onLine(lineNo, carry.toString("utf8").replace(/\r$/, ""), carryStart)
+    }
+  } finally {
+    stream.destroy()
+  }
+  return { stat, lineNo, completeLines, checkpoints, aborted: !!signal?.aborted }
+}
+
 async function searchLogFile(filePath, query, { limit = 500, caseSensitive = false, signal } = {}) {
   const q = String(query || "").trim()
   if (!q) throw new Error("搜索内容不能为空")
   const needle = caseSensitive ? q : q.toLowerCase()
   const max = Math.min(1000, Math.max(1, Number(limit) || 500))
   const matches = []
-  let lineNo = 0
   let found = 0
-  const stream = createReadStream(filePath, { encoding: "utf8" })
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-  try {
-    for await (const line of rl) {
-      if (signal?.aborted) break
-      lineNo++
-      const haystack = caseSensitive ? line : line.toLowerCase()
-      if (!haystack.includes(needle)) continue
-      found++
-      if (matches.length < max) matches.push({ line: lineNo, text: humanizeLogLine(line).slice(0, 600) })
-    }
-  } finally {
-    rl.close()
-    stream.destroy()
+  const scan = await scanLinesWithOffsets(filePath, (lineNo, line) => {
+    if (signal?.aborted) return
+    const haystack = caseSensitive ? line : line.toLowerCase()
+    if (!haystack.includes(needle)) return
+    found++
+    if (matches.length < max) matches.push({ line: lineNo, text: humanizeLogLine(line).slice(0, 600) })
+  }, { signal })
+  if (!scan.aborted) {
+    logIndexCache.set(filePath, {
+      file: filePath,
+      size: scan.stat.size,
+      lineCount: scan.completeLines,
+      checkpoints: scan.checkpoints,
+      ino: scan.stat.ino,
+      mtimeMs: scan.stat.mtimeMs,
+    })
   }
-  return { query: q, caseSensitive: !!caseSensitive, total: lineNo, found, matches, truncated: found > matches.length, cancelled: !!signal?.aborted }
+  return {
+    query: q,
+    caseSensitive: !!caseSensitive,
+    total: scan.lineNo,
+    found,
+    matches,
+    truncated: found > matches.length,
+    cancelled: scan.aborted,
+  }
 }
 
 async function readLogTail(filePath, maxLines = 200) {

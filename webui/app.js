@@ -962,7 +962,19 @@ async function openLogSearchHit(line, query) {
   state.logFocusLine = line - 1
   $("#logStatus").textContent = `正在打开第 ${line} 行…`
   try {
-    const data = await api(`/api/logs/page?file=${encodeURIComponent(file)}&center=${line - 1}&limit=${LOG_WINDOW_MAX}`)
+    const limits = [LOG_WINDOW_MAX, 1000, 300]
+    let data = null
+    for (let i = 0; i < limits.length; i++) {
+      try {
+        data = await api(`/api/logs/page?file=${encodeURIComponent(file)}&center=${line - 1}&limit=${limits[i]}`)
+        break
+      } catch (err) {
+        const retryable = /502|Bad Gateway|网关|timeout|超时/i.test(String(err.message || err))
+        if (!retryable || i === limits.length - 1) throw err
+        $("#logStatus").textContent = `日志索引尚未就绪，正在重试 ${i + 1}/${limits.length - 1}…`
+        await new Promise(r => setTimeout(r, 1200))
+      }
+    }
     state.logLines = data.lines || []
     state.logWindowStart = data.start || 0
     state.logWindowEnd = data.end || 0
