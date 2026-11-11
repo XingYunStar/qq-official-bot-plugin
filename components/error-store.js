@@ -6,11 +6,13 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import readline from "node:readline"
+import util from "node:util"
 
-const DEFAULT_IGNORE = ["40034005"]
+const DEFAULT_IGNORE = ["40034005", "40034105", "40034128"]
 const DEFAULT_RETENTION = 30
 const MAX_MESSAGE = 1200
-const MAX_DETAIL = 6000
+const MAX_CONTEXT = 20000
+const MAX_DETAIL = 30000
 
 function stripAnsi(text) {
   return String(text ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
@@ -65,15 +67,42 @@ function collectMessage(args) {
   for (const item of list) if (typeof item === "string" && item.trim()) return shortText(item, MAX_MESSAGE)
   return ""
 }
-function collectDetail(args) {
-  const list = Array.isArray(args) ? args : [args]
-  for (const item of list) {
-    if (item && typeof item === "object") {
-      if (item.stack) return shortText(item.stack, MAX_DETAIL)
-      if (item.response?.data) return shortText(item.response.data, MAX_DETAIL)
-    }
+function inspectValue(value, max = MAX_DETAIL) {
+  try {
+    return shortText(util.inspect(value, {
+      depth: 8,
+      maxArrayLength: 200,
+      maxStringLength: 4000,
+      compact: false,
+      breakLength: 120,
+    }), max)
+  } catch {
+    return shortText(String(value), max)
   }
-  return shortText(list, MAX_DETAIL)
+}
+
+function collectDetails(args) {
+  const list = Array.isArray(args) ? args : [args]
+  const err = list.find(item => item && typeof item === "object" && (item instanceof Error || item.stack || item.response))
+  const messageArg = list.find(item => Array.isArray(item) && item.length && item.some(x => x && typeof x === "object" && (x.type || x.file || x.data)))
+  const payload = messageArg ? inspectValue(messageArg, 6000) : ""
+  const context = inspectValue(args, MAX_CONTEXT)
+  const stack = err?.stack ? shortText(err.stack, MAX_DETAIL) : ""
+  const request = err?.config ? inspectValue({
+    method: err.config.method,
+    url: err.config.url,
+    baseURL: err.config.baseURL,
+    params: err.config.params,
+    data: err.config.data,
+  }, 10000) : ""
+  const response = err?.response?.data ? inspectValue(err.response.data, 10000) : ""
+  const pieces = []
+  if (context) pieces.push("【调用参数 / 消息内容】\n" + context)
+  if (stack) pieces.push("【错误堆栈】\n" + stack)
+  if (request) pieces.push("【请求信息】\n" + request)
+  if (response) pieces.push("【接口响应】\n" + response)
+  const detail = shortText(pieces.join("\n\n"), MAX_DETAIL)
+  return { payload, context, stack, request, response, detail }
 }
 
 export class ErrorStore {
@@ -92,7 +121,7 @@ export class ErrorStore {
     await fs.mkdir(path.dirname(this.file), { recursive: true })
     try {
       const cfg = JSON.parse(await fs.readFile(this.configFile, "utf8"))
-      if (Array.isArray(cfg.ignoredCodes)) this.ignored = new Set(cfg.ignoredCodes.map(String).filter(Boolean))
+      if (Array.isArray(cfg.ignoredCodes)) this.ignored = new Set([...DEFAULT_IGNORE, ...cfg.ignoredCodes.map(String).filter(Boolean)])
       if (Number.isFinite(+cfg.retentionDays)) this.retentionDays = Math.min(365, Math.max(1, +cfg.retentionDays))
     } catch {}
     this.ready = true
@@ -139,12 +168,13 @@ export class ErrorStore {
     try {
       const code = collectCode(args, new Set()) || "unknown"
       if (this.ignored.has(code)) return false
+      const details = collectDetails(args)
       const record = {
         time: Date.now(),
         bot: String(botId || "").slice(0, 40),
         code,
         message: collectMessage(args),
-        detail: collectDetail(args),
+        ...details,
       }
       void this.append(record)
       return true

@@ -634,3 +634,7 @@ body[data-tab="chat"]{background:var(--bg)}
 .log-search-result .ln{flex:0 0 62px;color:var(--brand-3);opacity:.85}
 .log-search-result .tx{min-width:0;white-space:pre-wrap;word-break:break-all;color:var(--muted)}
 .log-hit{background:rgba(250,204,21,.22);border-radius:3px}
+
+.error-payload{margin-top:8px;border:1px solid rgba(251,191,36,.18);background:rgba(251,191,36,.04);border-radius:8px;overflow:hidden}
+.error-payload-title{padding:5px 9px;color:var(--warn);font-size:10px;font-weight:700;border-bottom:1px solid rgba(251,191,36,.12)}
+.error-payload pre{margin:0;padding:8px 9px;max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:10px/1.5 var(--mono);color:var(--muted)}
