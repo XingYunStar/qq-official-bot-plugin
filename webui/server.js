@@ -19,6 +19,33 @@ import { dayKey } from "../components/group-stats.js"
 
 const DATA_DIR = path.join("data", "QQBot")
 const AUTH_FILE = path.join(DATA_DIR, "webui.json")
+/** 日志读取上限：error.log 可能达到数百 MB，不能整文件读入 */
+const LOG_TAIL_BYTES = 16 * 1024 * 1024
+
+/** 从文件尾部读取，避免大日志触发 "Invalid string length" */
+async function readLogTail(filePath, maxLines = 200) {
+  const stat = await fs.stat(filePath)
+  const start = Math.max(0, stat.size - LOG_TAIL_BYTES)
+  const handle = await fs.open(filePath, "r")
+  let text
+  try {
+    const buffer = Buffer.alloc(stat.size - start)
+    await handle.read(buffer, 0, buffer.length, start)
+    text = buffer.toString("utf8")
+  } finally {
+    await handle.close()
+  }
+  // 从文件中间开始时，第一行通常是不完整的，丢掉
+  if (start > 0) {
+    const nl = text.indexOf("\n")
+    if (nl !== -1) text = text.slice(nl + 1)
+  }
+  return {
+    lines: text.split("\n").map(humanizeLogLine).slice(-maxLines),
+    truncated: start > 0,
+    size: stat.size,
+  }
+}
 
 let running = null
 let passwordRevealAt = 0
@@ -707,9 +734,8 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const file = path.basename(url.searchParams.get("file") || "error.log")
         const tail = Math.min(2000, Math.max(10, Number(url.searchParams.get("tail")) || 200))
         try {
-          const text = await fs.readFile(path.join("logs", file), "utf8")
-          const lines = text.split("\n").map(humanizeLogLine)
-          return json(res, 200, { file, lines: lines.slice(-tail) })
+          const result = await readLogTail(path.join("logs", file), tail)
+          return json(res, 200, { file, lines: result.lines, truncated: result.truncated, size: result.size })
         } catch (err) {
           return json(res, 404, { error: String(err.message || err) })
         }
