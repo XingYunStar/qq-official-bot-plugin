@@ -1,12 +1,62 @@
 <div align="center">
 
-# qq-official-bot-plugin
+# 🚀 qq-official-bot-plugin
 
-**[TRSS-Yunzai](https://github.com/TimeRainStarSky/Yunzai) 的 QQ 官方机器人适配器插件**（基于 [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)）
+**TRSS-Yunzai 的 QQ 官方机器人适配器插件**
 
-[QQ 群 1046894467](https://qm.qq.com/q/WdZoPbyPsI) · [流萤QQ官方机器人](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
+基于 [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) 重写，兼容旧版 [QQBot-Plugin](https://github.com/TimeRainStarSky/Yunzai-QQBot-Plugin)
+
+[![TRSS-Yunzai](https://img.shields.io/badge/TRSS--Yunzai-3.1.3-8b5cf6?style=for-the-badge)](https://github.com/TimeRainStarSky/Yunzai)
+[![QQBot](https://img.shields.io/badge/qq--official--bot-1.3.4-22d3ee?style=for-the-badge)](https://www.npmjs.com/package/qq-official-bot)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.12-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![pnpm](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm&logoColor=white)](https://pnpm.io/)
+
+[![Stars](https://img.shields.io/github/stars/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=github&color=f59e0b)](https://github.com/XingYunStar/qq-official-bot-plugin/stargazers)
+[![Forks](https://img.shields.io/github/forks/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=git&color=ec4899)](https://github.com/XingYunStar/qq-official-bot-plugin/forks)
+[![Issues](https://img.shields.io/github/issues/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=github&color=ef4444)](https://github.com/XingYunStar/qq-official-bot-plugin/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=gitlab&color=a855f7)](https://github.com/XingYunStar/qq-official-bot-plugin/pulls)
+
+[![Last Commit](https://img.shields.io/github/last-commit/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=git&color=8b5cf6)](https://github.com/XingYunStar/qq-official-bot-plugin/commits)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=github&color=06b6d4)](https://github.com/XingYunStar/qq-official-bot-plugin/graphs/commit-activity)
+[![Repo Size](https://img.shields.io/github/repo-size/XingYunStar/qq-official-bot-plugin?style=flat-square&color=64748b)](https://github.com/XingYunStar/qq-official-bot-plugin)
+[![Code Size](https://img.shields.io/github/languages/code-size/XingYunStar/qq-official-bot-plugin?style=flat-square&color=14b8a6)](https://github.com/XingYunStar/qq-official-bot-plugin)
+[![Top Language](https://img.shields.io/github/languages/top/XingYunStar/qq-official-bot-plugin?style=flat-square&color=f97316)](https://github.com/XingYunStar/qq-official-bot-plugin)
+[![Tests](https://img.shields.io/badge/tests-173%20passed-22c55e?style=flat-square&logo=checkmarx&logoColor=white)](#测试)
+[![WebUI](https://img.shields.io/badge/WebUI-online-22c55e?style=flat-square&logo=googlechrome&logoColor=white)](http://61.184.23.160:2540/)
+
+[![QQ 群](https://img.shields.io/badge/QQ%20群-1046894467-12b7f5?style=for-the-badge&logo=tencentqq&logoColor=white)](https://qm.qq.com/q/WdZoPbyPsI)
+[![机器人](https://img.shields.io/badge/机器人-流萤-ff69b4?style=for-the-badge&logo=qq&logoColor=white)](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
+[![更新日志](https://img.shields.io/badge/更新日志-CHANGELOG-8b5cf6?style=for-the-badge&logo=readthedocs&logoColor=white)](CHANGELOG.md)
+
+<br>
+
+[快速开始](#快速开始) · [WebUI](#webui) · [功能](#新版支持了什么) · [配置](#配置) · [更新日志](CHANGELOG.md) · [QQ 群](https://qm.qq.com/q/WdZoPbyPsI)
 
 </div>
+
+<p align="center">
+  <a href="https://github.com/XingYunStar/qq-official-bot-plugin/stargazers">
+    <img src="https://api.star-history.com/svg?repos=XingYunStar/qq-official-bot-plugin&type=Date" alt="Star History" width="78%">
+  </a>
+</p>
+
+---
+
+## 📚 目录
+
+- [界面预览](#界面预览)
+- [简介](#简介)
+- [架构与消息流](#-架构与消息流)
+- [最近更新](#-最近更新)
+- [快速开始](#快速开始)
+- [新版支持了什么](#新版支持了什么)
+- [配置](#配置)
+- [WebUI](#webui)
+- [测试插件](#测试插件exampleqqbot-testjs)
+- [与旧版的差异](#与旧版的差异)
+- [已知限制](#已知限制)
+- [测试](#测试)
+- [致谢](#致谢)
 
 ---
 
@@ -32,6 +82,63 @@
 - 适配器 ID、`config/QQBot.yaml`、`data/QQBot/`、`#QQBotxxx` 命令全部沿用旧版，**可以从旧版直接迁移**
 - 收发消息内部仍使用 TRSS 熟悉的扁平消息结构，仅在适配器边界转换成 `qq-official-bot` 的 `{ type, data }`
 - 赠送一个功能测试插件（[example/qqbot-test.js](example/qqbot-test.js)），首次启动时自动安装到 `plugins/example/`，方便验证各项能力
+
+---
+
+## 🧭 架构与消息流
+
+### 组件关系
+
+```mermaid
+flowchart LR
+  QQ[QQ 开放平台] <-->|WebSocket / WebHook| SDK[qq-official-bot]
+  SDK <-->|事件 / 消息转换| AD[QQBot Adapter]
+  AD <-->|扁平消息 / 事件总线| TRSS[TRSS-Yunzai]
+  AD --> WEB[WebUI 控制台]
+  WEB --> STATS[运营数据]
+  WEB --> LOG[日志 / 报错]
+  WEB --> CHAT[群聊 / 群管理]
+  AD --> DATA[(data/QQBot)]
+```
+
+### 一条群消息
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as QQ 用户
+  participant Q as QQ 开放平台
+  participant S as qq-official-bot
+  participant A as QQBot Adapter
+  participant T as TRSS-Yunzai
+  participant W as WebUI
+
+  U->>Q: @机器人 发送消息
+  Q-->>S: GROUP_AT_MESSAGE_CREATE
+  S-->>A: 原始事件
+  A->>A: 转换扁平消息 / 去重 / 补 reply
+  A->>T: 派发 message 事件
+  T-->>A: e.reply(...)
+  A->>S: 发送群消息
+  S->>Q: POST /v2/groups/.../messages
+  A-->>W: 群聊 SSE / 日志 / 统计
+```
+
+---
+
+## 🆕 最近更新
+
+> 完整记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+| 日期 | 更新 |
+| --- | --- |
+| 2026-11-11 | `GROUP_MEMBER` 入群申请恢复；测试插件事件只记日志 |
+| 2026-11-11 | 报错归档：错误码筛选、30 天保留、完整发送内容、默认屏蔽 `40034005 / 40034105 / 40034128` |
+| 2026-11-11 | 日志页：连续滚动窗口、全文件搜索、随时停止、ANSI 配色 |
+| 2026-11-11 | 运营数据：相对日期按当前日期计算，登录过期明确提示 |
+| 2026-11-11 | 群聊：右键退出群聊；日志消息 INFO 落盘 |
+
+---
 
 ## 快速开始
 
@@ -243,7 +350,9 @@ https:
 | **URL 处理** | `toQRCode: true` 转二维码（旧行为）、`"link"` 转 Markdown 链接 `[host](url)`、`false` 原样发送 |
 | **稳定性** | 断线退避重连、心跳超时探测、access_token 失败无限重试、重复连接清理、与旧插件冲突时自动跳过连接 |
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
-| **WebUI** | 内置管理面板：配置、日志（历史/实时）、素材、群成员、运营数据；配置只填 AppID+AppSecret 自动获取机器人 QQ；密码在日志和 `data/QQBot/webui.json` |
+| **日志中心** | 历史日志 + 实时日志；连续滚动窗口；全文件搜索可随时停止；命中结果跳转定位；ANSI 彩色日志；大文件按行索引分页，不把整份日志塞给浏览器 |
+| **报错归档** | 按错误码查看最近 30 天报错；保存发送内容、调用参数、请求、响应、堆栈；默认屏蔽 `40034005` / `40034105` / `40034128`；WebUI 可直接查看完整上下文 |
+| **WebUI** | 内置管理面板：配置、日志、报错、素材、群成员、群聊、运营数据；群聊支持右键退出；配置只填 AppID+AppSecret 自动获取机器人 QQ；密码在日志和 `data/QQBot/webui.json` |
 | **测试插件自动安装** | 首次启动把 `example/qqbot-test.js` 复制到 `plugins/example/`，并向 master 发送使用说明（单聊） |
 
 ## 配置
@@ -302,6 +411,8 @@ markdown:
   - 首次上传复用次数 = 0，每次 MD5 复用 +1
   - **1 分钟**后清理复用次数 = 0 的素材；复用过的保留
   - **每天**清理复用次数 = 0 的记录；**每周**只保留复用次数最高的 20 张
+- `data/QQBot/error-log.ndjson`：QQBot 报错归档（30 天）
+  - `error-log.json`：屏蔽错误码和保留天数配置
 - `data/QQBot/<机器人QQ号>/refmap.ndjson`：`REFIDX` → 真实消息 ID 的引用索引
   - 收到的消息保留 **24 小时**，机器人自己发的消息保留 **7 天**
   - 每次启动时清理过期记录并原子重写；运行中每 10 分钟清理内存，按需压缩文件
@@ -317,11 +428,12 @@ markdown:
 - 功能：
   - 前端：`webui/index.html` + `webui/style.css` + `webui/app.js`（结构/样式/逻辑分离，改前端刷新即可，不用重启）
   - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/机器人账号），带字段校验并保留原有 YAML 结构；机器人 Token 按账号拆分成分字段表单，保存时才拼装成 YAML 行；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
-  - 日志：默认进入日志页即开始实时；hook 全局 `logger` 捕获所有插件日志，服务端按级别过滤并 220ms 批量推送；默认 INFO 及以上（隐藏 DEBUG/TRACE），可切全部/DEBUG/WARN/ERROR；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
+  - 日志：默认进入日志页即开始实时；hook 全局 `logger`（含 `Bot.makeLog`）捕获所有插件日志；支持 ANSI 彩色显示、连续滚动自动加载、全文件搜索、随时停止搜索；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
+  - 报错：按错误码归档，默认屏蔽 40034005 / 40034105 / 40034128；每条保留发送内容、调用参数、请求、响应和完整堆栈；保留 30 天
   - 系统状态：负载（1/5/15）、CPU、GPU（nvidia-smi）、内存、SWAP、磁盘、网络速率/网卡、Node 内存、运行时间、机器人数，3 秒自动刷新
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）
   - 群管理：群头像/群名/成员数、总指令数/今日指令、群内能力（管理员、主动消息、全量消息）、成员列表、禁言/解除/踢人、群黑名单
-  - 群聊：仿 QQ 三栏界面，群列表/成员列表每 15 秒自动刷新（页面隐藏时暂停，没有刷新按钮），消息走 SSE 实时；聊天图片服务端缩略到 1200px 并缓存，避免超大截图解码卡顿；群头像用 q.qq.com / OneBot 群列表按群名匹配并缓存到 `data/QQBot/group-avatar-cache.json`，5 分钟尝试刷新，旧缓存不丢弃；成员昵称/头像/身份落盘 `data/QQBot/member-cache.json` 永久保存（缓存 5 分钟只用于控制读取频率，不删除旧成员）；右键成员可 @、按自定义时长禁言、解除、踢出，右键消息可复制文字/图片/链接、引用回复、撤回；@ 会去掉“机器人appid:”前缀；发送失败的消息显示红色感叹号，可点击重试；支持搜索群名、发送文本、Markdown/LaTeX（含 QQ `[#32px #32px](url)` 图片尺寸语法）、粘贴图片、选择本地图片；Markdown 附件占位符会剥离，图片/文件按卡片展示；引用消息里的 @openid 自动显示昵称（包括机器人昵称）；输入框可拖高；记录最多保留 24 小时并落盘
+  - 群聊：仿 QQ 三栏界面，群列表/成员列表每 15 秒自动刷新（页面隐藏时暂停，没有刷新按钮），消息走 SSE 实时；右键群聊可打开或退出群聊；聊天图片服务端缩略到 1200px 并缓存，避免超大截图解码卡顿；群头像用 q.qq.com / OneBot 群列表按群名匹配并缓存到 `data/QQBot/group-avatar-cache.json`，5 分钟尝试刷新，旧缓存不丢弃；成员昵称/头像/身份落盘 `data/QQBot/member-cache.json` 永久保存（缓存 5 分钟只用于控制读取频率，不删除旧成员）；右键成员可 @、按自定义时长禁言、解除、踢出，右键消息可复制文字/图片/链接、引用回复、撤回；@ 会去掉“机器人appid:”前缀；发送失败的消息显示红色感叹号，可点击重试；支持搜索群名、发送文本、Markdown/LaTeX（含 QQ `[#32px #32px](url)` 图片尺寸语法）、粘贴图片、选择本地图片；Markdown 附件占位符会剥离，图片/文件按卡片展示；引用消息里的 @openid 自动显示昵称（包括机器人昵称）；输入框可拖高；记录最多保留 24 小时并落盘
   - 本地群统计：按群记录消息量、指令使用量、每日趋势，保存在 `data/QQBot/group-stats.json`
   - 菜单/指令面板：自定义菜单 JSON 编辑、指令面板创建/删除，内置可用的菜单/面板示例
   - 运营数据：今天 / 昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围
