@@ -592,3 +592,28 @@ body[data-tab="chat"]{background:var(--bg)}
 .token-resolve:hover{background:rgba(139,92,246,.22);color:var(--text);transform:none;filter:none}
 .token-fields{grid-template-columns:145px minmax(185px,1fr) 150px 100px 78px 88px}
 @media(max-width:1100px){.token-fields{grid-template-columns:1fr 1fr}}
+
+/* ---------- error code archive ---------- */
+.error-toolbar,.error-ignore{margin:10px 0;align-items:center}
+.error-ignore label{font-size:11px;color:var(--muted)}
+.error-list{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.error-item{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px 14px}
+.error-head{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.error-code{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:7px;color:var(--bad);background:rgba(251,113,133,.1);border:1px solid rgba(251,113,133,.22)}
+.error-time,.error-bot{font-size:10px;color:var(--faint)}
+.error-msg{margin-top:7px;font-size:12px;line-height:1.55;color:var(--text);word-break:break-word}
+.error-detail{margin-top:8px;font-size:10px;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto}
+.error-detail summary{cursor:pointer;color:var(--brand-2);font-size:10px;margin-bottom:5px}
+@media(max-width:700px){.error-toolbar,.error-ignore{align-items:flex-start}.error-toolbar select,.error-toolbar input,.error-ignore input{width:100%}}
+
+/* ---------- logs page ---------- */
+.log-toolbar{display:grid;grid-template-columns:1.25fr 1.15fr 1.1fr;gap:12px;margin-bottom:12px}
+.log-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.log-group-title{width:100%;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-bottom:1px}
+.log-group label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.log-group select,.log-group input{padding:7px 9px;font-size:11px}
+.log-group button{padding:7px 11px;font-size:11px}
+.log-status{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 8px;font-size:10px;color:var(--muted)}
+@media(max-width:1100px){.log-toolbar{grid-template-columns:1fr 1fr}.log-group:last-child{grid-column:1/-1}}
+@media(max-width:700px){.log-toolbar{grid-template-columns:1fr}.log-group:last-child{grid-column:auto}}
+

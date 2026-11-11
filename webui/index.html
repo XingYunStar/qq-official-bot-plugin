@@ -63,6 +63,7 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
       <button data-tab="stats" class="on"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span>运营数据</button>
       <button data-tab="config"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>配置</button>
       <button data-tab="logs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span>日志</button>
+      <button data-tab="errors"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 3.8L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>报错</button>
       <button data-tab="system"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>系统状态</button>
       <button data-tab="materials"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>素材</button>
       <button data-tab="groups"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>群管理</button>
@@ -159,23 +160,61 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
   </section>
 
   <section id="tab-logs" class="hide">
-    <div class="row">
-      <select id="logFile"></select>
-      <input id="logTail" type="number" value="200" min="10" max="2000" style="width:100px">
-      <button class="ghost" id="logLoad">加载</button>
-      <input id="logSearch" placeholder="搜索日志…" style="min-width:180px">
-      <select id="logLevel" title="实时日志级别">
-        <option value="all">全部级别</option>
-        <option value="debug">DEBUG 及以上</option>
-        <option value="info" selected>INFO 及以上（默认）</option>
-        <option value="warn">WARN 及以上</option>
-        <option value="error">ERROR 及以上</option>
-      </select>
-      <button class="ghost" id="logPause">暂停</button>
-      <button id="logLive">实时：关</button>
-      <button class="ghost" id="logDownload">下载</button>
+    <div class="log-toolbar">
+      <div class="log-group">
+        <div class="log-group-title">实时日志</div>
+        <label>级别
+          <select id="logLevel">
+            <option value="all">全部级别</option>
+            <option value="debug">DEBUG 及以上</option>
+            <option value="info" selected>INFO 及以上（默认）</option>
+            <option value="warn">WARN 及以上</option>
+            <option value="error">ERROR 及以上</option>
+          </select>
+        </label>
+        <button id="logLive">开启实时</button>
+        <button class="ghost" id="logPause" disabled>暂停刷新</button>
+      </div>
+      <div class="log-group">
+        <div class="log-group-title">历史日志</div>
+        <label>文件 <select id="logFile"></select></label>
+        <label>初始加载 <input id="logTail" type="number" value="2000" min="100" max="3000" style="width:92px"> 行</label>
+        <button id="logLoad">加载日志</button>
+      </div>
+      <div class="log-group">
+        <div class="log-group-title">当前视图</div>
+        <input id="logSearch" placeholder="在当前已加载日志中搜索…" style="min-width:220px">
+        <button class="ghost" id="logDownload">下载当前内容</button>
+      </div>
     </div>
-    <pre class="log" id="logText">点击「实时」开始监听 TRSS 全部插件日志，或选择文件加载历史日志</pre>
+    <div class="log-status"><span id="logStatus">尚未加载日志</span><span class="muted">滚动到顶部/底部自动加载；窗口最多保留 3000 行</span></div>
+    <pre class="log" id="logText">选择上方文件后点击「加载日志」，或点击「开启实时」监听全部插件日志</pre>
+  </section>
+
+  <section id="tab-errors" class="hide">
+    <div class="row between">
+      <h2 style="margin:0">机器人报错</h2>
+      <div class="row">
+        <span class="muted" id="errStats"></span>
+        <button class="ghost" id="errRefresh">刷新</button>
+      </div>
+    </div>
+    <p class="muted">错误码归档保留 30 天；默认屏蔽 40034005（回复消息 msg_id 已过期），不存储、不记录。</p>
+    <div class="row error-toolbar">
+      <label>错误码 <select id="errCodeSel"></select></label>
+      <label>每页 <input id="errLimit" type="number" value="200" min="1" max="500" style="width:80px"> 条</label>
+      <button class="ghost" id="errLoad">加载</button>
+      <span class="muted" id="errPage"></span>
+      <span class="muted" id="errRetention"></span>
+    </div>
+    <div class="row error-ignore">
+      <label for="errIgnored">屏蔽错误码</label>
+      <input id="errIgnored" placeholder="例如 40034005, 40034006" style="min-width:260px">
+      <button id="errIgnoreSave">保存屏蔽码</button>
+      <span class="muted">多个用逗号分隔；加入后历史中对应 code 也会移除</span>
+    </div>
+    <div id="errList" class="error-list"></div>
+    <div class="row" style="justify-content:center;margin:14px 0"><button class="ghost hide" id="errMore">加载更早的报错</button></div>
   </section>
 
   <section id="tab-system" class="hide">

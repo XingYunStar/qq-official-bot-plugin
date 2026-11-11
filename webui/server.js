@@ -5,9 +5,11 @@
  */
 import http from "node:http"
 import fs from "node:fs/promises"
+import { createReadStream } from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
 import os from "node:os"
+import readline from "node:readline"
 import { execFile as execFileCb } from "node:child_process"
 import { promisify, format as formatUtil } from "node:util"
 import YAML from "yaml"
@@ -20,30 +22,114 @@ import { dayKey } from "../components/group-stats.js"
 const DATA_DIR = path.join("data", "QQBot")
 const AUTH_FILE = path.join(DATA_DIR, "webui.json")
 /** 日志读取上限：error.log 可能达到数百 MB，不能整文件读入 */
-const LOG_TAIL_BYTES = 16 * 1024 * 1024
+const LOG_CHUNK_BYTES = 1024 * 1024
+const LOG_MAX_BYTES = 128 * 1024 * 1024
 
-/** 从文件尾部读取，避免大日志触发 "Invalid string length" */
-async function readLogTail(filePath, maxLines = 200) {
+/** 超大日志分页：按行建立稀疏字节索引（每 1000 行一个锚点） */
+const LOG_LINE_STEP = 1000
+const logIndexCache = new Map()
+const logIndexTasks = new Map()
+
+async function scanLogIndex(filePath, index) {
   const stat = await fs.stat(filePath)
-  const start = Math.max(0, stat.size - LOG_TAIL_BYTES)
   const handle = await fs.open(filePath, "r")
-  let text
   try {
-    const buffer = Buffer.alloc(stat.size - start)
-    await handle.read(buffer, 0, buffer.length, start)
-    text = buffer.toString("utf8")
+    let position = index.size
+    let lineCount = index.lineCount
+    const checkpoints = index.checkpoints
+    const size = stat.size
+    while (position < size) {
+      const length = Math.min(LOG_CHUNK_BYTES, size - position)
+      const buffer = Buffer.alloc(length)
+      await handle.read(buffer, 0, length, position)
+      for (let i = 0; i < length; i++) {
+        if (buffer[i] !== 10) continue
+        lineCount++
+        if (lineCount % LOG_LINE_STEP === 0) checkpoints.push({ line: lineCount, offset: position + i + 1 })
+      }
+      position += length
+    }
+    index.size = size
+    index.lineCount = lineCount
+    index.mtimeMs = stat.mtimeMs
+    index.ino = stat.ino
+    return index
   } finally {
     await handle.close()
   }
-  // 从文件中间开始时，第一行通常是不完整的，丢掉
-  if (start > 0) {
-    const nl = text.indexOf("\n")
-    if (nl !== -1) text = text.slice(nl + 1)
+}
+
+async function ensureLogIndex(filePath) {
+  let stat
+  try { stat = await fs.stat(filePath) } catch { throw new Error("日志文件不存在") }
+  let index = logIndexCache.get(filePath)
+  if (index && (stat.size < index.size || stat.ino !== index.ino)) index = null
+  if (!index) {
+    index = { file: filePath, size: 0, lineCount: 0, checkpoints: [{ line: 0, offset: 0 }], ino: stat.ino, mtimeMs: 0 }
+    logIndexCache.set(filePath, index)
   }
-  return {
-    lines: text.split("\n").map(humanizeLogLine).slice(-maxLines),
-    truncated: start > 0,
-    size: stat.size,
+  if (index.size === stat.size) return index
+  if (!logIndexTasks.has(filePath)) {
+    logIndexTasks.set(filePath, scanLogIndex(filePath, index).finally(() => logIndexTasks.delete(filePath)))
+  }
+  return logIndexTasks.get(filePath)
+}
+
+async function readLogPage(filePath, { offset = 0, limit = 1000 } = {}) {
+  const index = await ensureLogIndex(filePath)
+  const total = index.lineCount
+  const max = Math.min(20000, Math.max(1, Number(limit) || 1000))
+  const skip = Math.max(0, Number(offset) || 0)
+  const end = Math.max(0, total - skip)
+  const start = Math.max(0, end - max)
+  let checkpoint = index.checkpoints[0]
+  for (const cp of index.checkpoints) if (cp.line <= start) checkpoint = cp
+  const lines = []
+  const stream = createReadStream(filePath, { start: checkpoint.offset, encoding: "utf8" })
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+  let current = checkpoint.line
+  try {
+    for await (const text of rl) {
+      if (current >= end) break
+      if (current >= start) lines.push(humanizeLogLine(text))
+      current++
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+  return { file: filePath, total, offset: skip, limit: max, start, end, lines, hasNewer: end < total, hasOlder: start > 0 }
+}
+
+/** 从文件尾部按块读取，足够行数就停止，避免大日志触发 Invalid string length */
+async function readLogTail(filePath, maxLines = 200) {
+  const stat = await fs.stat(filePath)
+  const handle = await fs.open(filePath, "r")
+  try {
+    const chunks = []
+    let position = stat.size
+    let newlines = 0
+    while (position > 0 && newlines <= maxLines && stat.size - position < LOG_MAX_BYTES) {
+      const length = Math.min(LOG_CHUNK_BYTES, position)
+      position -= length
+      const buffer = Buffer.alloc(length)
+      await handle.read(buffer, 0, length, position)
+      chunks.unshift(buffer)
+      for (let i = 0; i < buffer.length; i++) if (buffer[i] === 10) newlines++
+    }
+    let text = Buffer.concat(chunks).toString("utf8")
+    if (position > 0) {
+      const nl = text.indexOf("\n")
+      if (nl !== -1) text = text.slice(nl + 1)
+      else text = ""
+    }
+    return {
+      lines: text.split("\n").map(humanizeLogLine).slice(-maxLines),
+      truncated: position > 0,
+      size: stat.size,
+    }
+  } finally {
+    await handle.close()
   }
 }
 
@@ -718,6 +804,32 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         return json(res, 200, { ok: true, note: "部分设置需要重启 TRSS 生效" })
       }
 
+      // ---- error log ----
+      if (pathname === "/api/error-log/codes" && req.method === "GET") {
+        if (!adapter.errorStore) return json(res, 503, { error: "错误码归档尚未初始化" })
+        try { return json(res, 200, await adapter.errorStore.codes()) }
+        catch (err) { return json(res, 500, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/error-log" && req.method === "GET") {
+        if (!adapter.errorStore) return json(res, 503, { error: "错误码归档尚未初始化" })
+        const code = String(url.searchParams.get("code") || "all")
+        const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 200))
+        const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0)
+        try { return json(res, 200, await adapter.errorStore.list({ code, limit, offset })) }
+        catch (err) { return json(res, 500, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/error-log/config" && req.method === "POST") {
+        if (!adapter.errorStore) return json(res, 503, { error: "错误码归档尚未初始化" })
+        const body = JSON.parse((await readBody(req)) || "{}")
+        try {
+          const state = await adapter.errorStore.setConfig({
+            ignoredCodes: Array.isArray(body.ignoredCodes) ? body.ignoredCodes : undefined,
+            retentionDays: body.retentionDays,
+          })
+          return json(res, 200, { ok: true, ...state })
+        } catch (err) { return json(res, 500, { error: String(err.message || err) }) }
+      }
+
       // ---- logs ----
       if (pathname === "/api/logs/files") {
         let files = []
@@ -732,13 +844,20 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       }
       if (pathname === "/api/logs") {
         const file = path.basename(url.searchParams.get("file") || "error.log")
-        const tail = Math.min(2000, Math.max(10, Number(url.searchParams.get("tail")) || 200))
+        const tail = Math.min(20000, Math.max(10, Number(url.searchParams.get("tail")) || 200))
         try {
           const result = await readLogTail(path.join("logs", file), tail)
           return json(res, 200, { file, lines: result.lines, truncated: result.truncated, size: result.size })
         } catch (err) {
           return json(res, 404, { error: String(err.message || err) })
         }
+      }
+      if (pathname === "/api/logs/page") {
+        const file = path.basename(url.searchParams.get("file") || "error.log")
+        const limit = Math.min(20000, Math.max(1, Number(url.searchParams.get("limit")) || 1000))
+        const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0)
+        try { return json(res, 200, await readLogPage(path.join("logs", file), { offset, limit })) }
+        catch (err) { return json(res, 404, { error: String(err.message || err) }) }
       }
       if (pathname === "/api/logs/stream") {
         const file = path.basename(url.searchParams.get("file") || "error.log")

@@ -15,6 +15,7 @@ import { startWebUI, isWebUIInitialized } from "./webui/server.js"
 import { GroupStats } from "./components/group-stats.js"
 import { GroupChat, normalizeChatContent } from "./components/group-chat.js"
 import { MemberCache } from "./components/member-cache.js"
+import { ErrorStore } from "./components/error-store.js"
 import { parseTokenLine, formatTokenLine, parseCompactTokenLine, fetchBotQQ } from "./components/token.js"
 import { normalizeCard, cardToText, splitCardMessages } from "./components/card.js"
 import QQBot from "qq-official-bot"
@@ -179,6 +180,7 @@ const adapter = new (class QQBotAdapter {
     this.materials = {}
     this.materialMd5 = {}
     this.materialMeta = {}
+    this.errorStore = new ErrorStore()
     // GROUP_MEMBER intent 若平台未授权，运行期自动降级一次，避免反复 4014
     this.groupMemberDenied = {}
     this.materialReady = {}
@@ -986,7 +988,10 @@ const adapter = new (class QQBotAdapter {
               for (const [k, v] of this.sentMsgs) if (v < Date.now()) this.sentMsgs.delete(k)
           }
         } catch (err) {
-          Bot.makeLog("error", ["发送消息错误", i, err], data.self_id)
+          const logArgs = ["发送消息错误", i, err]
+          const ignored = this.errorStore?.isIgnored(logArgs)
+          this.errorStore?.capture(data.self_id, logArgs)
+          if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
           rets.error.push(err)
           return false
         }
@@ -1164,7 +1169,10 @@ const adapter = new (class QQBotAdapter {
               for (const [k, v] of this.sentMsgs) if (v < Date.now()) this.sentMsgs.delete(k)
           }
         } catch (err) {
-          Bot.makeLog("error", ["发送消息错误", i, err], data.self_id)
+          const logArgs = ["发送消息错误", i, err]
+          const ignored = this.errorStore?.isIgnored(logArgs)
+          this.errorStore?.capture(data.self_id, logArgs)
+          if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
           rets.error.push(err)
           return false
         }
@@ -3163,6 +3171,10 @@ const adapter = new (class QQBotAdapter {
     for (const i of ["trace", "debug", "info", "mark", "warn", "error", "fatal"])
       Bot[id].sdk.logger[i] = (...args) => {
         if (args[0]?.startsWith?.("recv from")) return
+        if (i === "error") {
+          if (this.errorStore?.isIgnored(args)) return
+          this.errorStore?.capture(id, args)
+        }
         return Bot.makeLog(i, args, id)
       }
 
@@ -3218,6 +3230,7 @@ const adapter = new (class QQBotAdapter {
         } catch {}
         return this.connect(token)
       }
+      this.errorStore?.capture(id, [`${this.name}(${this.id}) ${this.version} 连接失败`, err])
       Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)
       this.token[id]?.dispose()
       try {
@@ -3278,6 +3291,7 @@ const adapter = new (class QQBotAdapter {
       )
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
+    await this.errorStore.init()
     this.webuiEnabled = config.webui?.enabled !== false
     this.webuiDataEnabled = false
     if (this.webuiEnabled && (await isWebUIInitialized())) await this.enableWebUIData()
