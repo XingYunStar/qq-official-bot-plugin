@@ -783,6 +783,89 @@ function logClass(line) {
   if (level <= 1) return "log-debug"
   return "log-info"
 }
+const ANSI_FG = {
+  30: "#475569", 31: "#f87171", 32: "#4ade80", 33: "#fbbf24", 34: "#60a5fa", 35: "#e879f9", 36: "#22d3ee", 37: "#e5e7eb",
+  90: "#64748b", 91: "#fb7185", 92: "#86efac", 93: "#fde047", 94: "#93c5fd", 95: "#f0abfc", 96: "#67e8f9", 97: "#ffffff",
+}
+const ANSI_BG = {
+  40: "#1e293b", 41: "#7f1d1d", 42: "#14532d", 43: "#713f12", 44: "#1e3a8a", 45: "#701a75", 46: "#164e63", 47: "#334155",
+  100: "#334155", 101: "#991b1b", 102: "#166534", 103: "#854d0e", 104: "#1e40af", 105: "#86198f", 106: "#155e75", 107: "#64748b",
+}
+function xtermColor(n) {
+  n = Number(n) || 0
+  if (n < 16) return ANSI_FG[30 + (n & 7)] || ANSI_FG[30]
+  if (n < 232) {
+    const v = n - 16
+    const r = Math.floor(v / 36), g = Math.floor((v % 36) / 6), b = v % 6
+    const c = x => x ? 55 + x * 40 : 0
+    return `rgb(${c(r)},${c(g)},${c(b)})`
+  }
+  const c = 8 + (n - 232) * 10
+  return `rgb(${c},${c},${c})`
+}
+function applyAnsiSgr(state, raw) {
+  const codes = String(raw || "0").split(";").map(x => Number(x) || 0)
+  for (let i = 0; i < codes.length; i++) {
+    const c = codes[i]
+    if (c === 0) Object.assign(state, { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, inverse: false })
+    else if (c === 1) state.bold = true
+    else if (c === 2) state.dim = true
+    else if (c === 3) state.italic = true
+    else if (c === 4) state.underline = true
+    else if (c === 7) state.inverse = true
+    else if (c === 22) { state.bold = false; state.dim = false }
+    else if (c === 23) state.italic = false
+    else if (c === 24) state.underline = false
+    else if (c === 27) state.inverse = false
+    else if (c === 39) state.fg = null
+    else if (c === 49) state.bg = null
+    else if (ANSI_FG[c]) state.fg = ANSI_FG[c]
+    else if (ANSI_BG[c]) state.bg = ANSI_BG[c]
+    else if (c === 38 || c === 48) {
+      const mode = codes[++i]
+      let color = null
+      if (mode === 5) color = xtermColor(codes[++i])
+      else if (mode === 2) {
+        const r = codes[++i] || 0, g = codes[++i] || 0, b = codes[++i] || 0
+        color = `rgb(${r},${g},${b})`
+      }
+      if (color) { if (c === 38) state.fg = color; else state.bg = color }
+    }
+  }
+}
+function ansiCss(state) {
+  let fg = state.fg, bg = state.bg
+  if (state.inverse) [fg, bg] = [bg || "#0b1020", fg || "#e8edf7"]
+  const css = []
+  if (fg) css.push(`color:${fg}`)
+  if (bg) css.push(`background:${bg}`)
+  if (state.bold) css.push("font-weight:700")
+  if (state.dim) css.push("opacity:.72")
+  if (state.italic) css.push("font-style:italic")
+  if (state.underline) css.push("text-decoration:underline")
+  return css.join(";")
+}
+function ansiToHtml(text, re) {
+  const ansi = /\x1b\[([0-9;]*)m/g
+  const state = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, inverse: false }
+  let out = ""
+  let last = 0
+  const push = chunk => {
+    if (!chunk) return
+    let html = esc(chunk)
+    if (re) html = html.replace(re, m => `<mark>${m}</mark>`)
+    const css = ansiCss(state)
+    out += css ? `<span style="${css}">${html}</span>` : html
+  }
+  let m
+  while ((m = ansi.exec(text))) {
+    push(text.slice(last, m.index))
+    applyAnsiSgr(state, m[1])
+    last = ansi.lastIndex
+  }
+  push(text.slice(last))
+  return out || " "
+}
 function renderLogs(scroll = false) {
   const el = $("#logText")
   const min = LOG_MIN[state.logLevel] ?? 2
@@ -791,9 +874,7 @@ function renderLogs(scroll = false) {
   const q = state.logHighlightQuery
   const re = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig") : null
   el.innerHTML = items.map(({ line, abs }) => {
-    let html = esc(line) || " "
-    if (re) html = html.replace(re, m => `<mark>${m}</mark>`)
-    return `<span data-log-line="${abs}" class="${logClass(line)}">${html}</span>`
+    return `<span data-log-line="${abs}" class="${logClass(line)}">${ansiToHtml(line, re)}</span>`
   }).join("\n")
   if (scroll) el.scrollTop = el.scrollHeight
 }

@@ -100,7 +100,7 @@ async function readLogPage(filePath, { offset = 0, limit = 1000, center = null }
   try {
     for await (const text of rl) {
       if (current >= end) break
-      if (current >= start) lines.push(humanizeLogLine(text))
+      if (current >= start) lines.push(humanizeLogLine(text, { keepColor: true }))
       current++
     }
   } finally {
@@ -158,7 +158,7 @@ async function readLogTail(filePath, maxLines = 200) {
       else text = ""
     }
     return {
-      lines: text.split("\n").map(humanizeLogLine).slice(-maxLines),
+      lines: text.split("\n").map(line => humanizeLogLine(line, { keepColor: true })).slice(-maxLines),
       truncated: position > 0,
       size: stat.size,
     }
@@ -472,9 +472,9 @@ function adapterGroupStatsName(botId, fullId) {
     return stats?.get?.(botId, fullId)?.name || ""
   } catch { return "" }
 }
-function humanizeLogLine(line) {
+function humanizeLogLine(line, { keepColor = false } = {}) {
   if (typeof line !== "string") return line
-  let out = stripAnsi(line).replace(/\[(\d+):([A-Za-z0-9_-]{8,}), (\d+):([A-Za-z0-9_-]{8,})\]/g, (m, b1, g1, b2, u2) => {
+  let out = (keepColor ? line : stripAnsi(line)).replace(/\[(\d+):([A-Za-z0-9_-]{8,}), (\d+):([A-Za-z0-9_-]{8,})\]/g, (m, b1, g1, b2, u2) => {
     const groupFull = `${b1}:${g1}`
     const userFull = `${b2}:${u2}`
     const gname = lookupGroupName(b1, groupFull)
@@ -512,7 +512,7 @@ function flushLive() {
     const fresh = liveLog.entries.filter(e => e.id > client.lastId && e.rank >= client.rank)
     const send = fresh.slice(-LIVE_LOG_BATCH)
     const dropped = Math.max(0, fresh.length - send.length)
-    const lines = send.map(e => humanizeLogLine(e.line))
+    const lines = send.map(e => humanizeLogLine(e.line, { keepColor: true }))
     if (dropped) lines.push(`[实时日志] 处理不过来，已省略 ${dropped} 条低优先级/高频日志`)
     if (lines.length) {
       try { if (!client.res.writableEnded) client.res.write(`data: ${JSON.stringify({ lines })}\n\n`) } catch {}
@@ -524,7 +524,6 @@ function captureLog(level, args) {
   let text
   try { text = args.length ? formatUtil(...args) : "" }
   catch { text = args.map(a => String(a)).join(" ") }
-  text = stripAnsi(text)
   const time = new Date().toLocaleTimeString("zh-CN", { hour12: false })
   const line = `[${time}][${level.toUpperCase()}] ${text}`
   liveLog.entries.push({ id: ++liveLog.seq, line, rank: LOG_RANK[level] ?? 2 })
