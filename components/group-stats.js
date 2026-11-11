@@ -55,6 +55,14 @@ export class GroupStats {
     return this.bot(botId).groups[groupId]
   }
 
+  remove(botId, groupId) {
+    const groups = this.data.bots?.[botId]?.groups
+    if (!groups || !(groupId in groups)) return false
+    delete groups[groupId]
+    this.scheduleSave()
+    return true
+  }
+
   record(botId, group = {}) {
     if (!botId || !group.group_id) return null
     const groups = this.bot(botId).groups

@@ -498,13 +498,16 @@ function captureLog(level, args) {
   if (liveLog.clients.size) scheduleLiveFlush()
 }
 function installLiveLog(logger) {
-  if (!logger || logger.__qqbotLiveHooked) return
+  if (!logger) return
+  // Bot.makeLog 走的是 logger.logger[level]，只包外层 logger.info 会漏掉群消息等 INFO
+  const target = logger.logger && typeof logger.logger === "object" ? logger.logger : logger
+  if (target.__qqbotLiveHooked) return
   const levels = ["trace", "debug", "info", "mark", "warn", "error", "fatal"]
   for (const level of levels) {
-    if (typeof logger[level] !== "function") continue
-    const original = logger[level]
+    if (typeof target[level] !== "function") continue
+    const original = target[level]
     try {
-      logger[level] = function (...args) {
+      target[level] = function (...args) {
         captureLog(level, args)
         return original.apply(this, args)
       }
@@ -512,7 +515,7 @@ function installLiveLog(logger) {
       try { console.error("[QQBot] 实时日志 hook 失败", level, err.message) } catch {}
     }
   }
-  try { logger.__qqbotLiveHooked = true } catch {}
+  try { target.__qqbotLiveHooked = true } catch {}
 }
 
 function logPasswordBanner(logger, password) {
@@ -1224,6 +1227,32 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         chatMembersResponseCache.set(memberKey, { at: Date.now(), data: payload })
         if (chatMembersResponseCache.size > 80) chatMembersResponseCache.delete(chatMembersResponseCache.keys().next().value)
         return json(res, 200, payload)
+      }
+      if (pathname === "/api/group/quit" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}")
+        const id = String(body.bot || "")
+        const group = String(body.group || "")
+        if (!Bot[id]) return json(res, 400, { error: "机器人不在线或未配置" })
+        if (!group) return json(res, 400, { error: "缺少群 ID" })
+        try {
+          const rawGroup = adapter.rawId(group)
+          const sdk = Bot[id].sdk
+          const state = await sdk.groupService.getBotState(rawGroup)
+          const selfOpenid = state?.member_openid
+          if (!selfOpenid) return json(res, 400, { error: "未获取到机器人在本群的 member_openid" })
+          const result = await sdk.groupService.removeMembers(rawGroup, {
+            member_openids: [selfOpenid],
+            add_to_member_blacklist: false,
+          })
+          if (result?.remove_members_result !== "success")
+            return json(res, 400, { error: String(result?.remove_members_result || "退出群聊失败") })
+          adapter.groupChat?.clear?.(id, group)
+          adapter.groupStats?.remove?.(id, group)
+          try { await Bot[id].gl?.delete?.(group) } catch {}
+          return json(res, 200, { ok: true, group })
+        } catch (err) {
+          return json(res, 500, { error: String(err.response?.data?.message || err.response?.data?.msg || err.message || err) })
+        }
       }
       if (pathname === "/api/group/recall" && req.method === "POST") {
         const body = JSON.parse((await readBody(req)) || "{}")
