@@ -637,7 +637,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             if (!/^[A-Za-z0-9]{32}$/.test(secret || "")) return json(res, 400, { error: `AppSecret 必须是 32 位字母或数字：${p[0] || "未命名账号"}` })
           }
         }
-        const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "webui", "bot", "reconnect", "markdown", "token"]
+        const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "groupMemberEvent", "webui", "bot", "reconnect", "markdown", "token"]
         try {
           const file = body.file
           const raw = await fs.readFile(file, "utf8")
