@@ -1,16 +1,64 @@
-# 更新日志
+<div align="center">
 
-## 2026-11-11
+# 🚀 QQBot Plugin 更新日志
 
-今天共有 5 个功能提交，按时间从早到晚记录。
+**TRSS-Yunzai · QQ 官方机器人适配器 · WebUI 控制台**
+
+[![GitHub](https://img.shields.io/badge/GitHub-XingYunStar%2Fqq--official--bot--plugin-181717?style=for-the-badge&logo=github)](https://github.com/XingYunStar/qq-official-bot-plugin)
+[![Last Commit](https://img.shields.io/github/last-commit/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=git&label=last%20commit&color=8b5cf6)](https://github.com/XingYunStar/qq-official-bot-plugin/commits)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=github&label=commits%2Fmonth&color=06b6d4)](https://github.com/XingYunStar/qq-official-bot-plugin/graphs/commit-activity)
+
+[![Stars](https://img.shields.io/github/stars/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=github&color=f59e0b)](https://github.com/XingYunStar/qq-official-bot-plugin/stargazers)
+[![Forks](https://img.shields.io/github/forks/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=git&color=ec4899)](https://github.com/XingYunStar/qq-official-bot-plugin/forks)
+[![Issues](https://img.shields.io/github/issues/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=github&color=ef4444)](https://github.com/XingYunStar/qq-official-bot-plugin/issues)
+
+[![TRSS-Yunzai](https://img.shields.io/badge/TRSS--Yunzai-3.1.3-8b5cf6?style=for-the-badge)](https://github.com/TimeRainStarSky/Yunzai)
+[![Node](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Tests](https://img.shields.io/badge/tests-173%20passed-22c55e?style=flat-square&logo=checkmarx&logoColor=white)](#-验证)
+[![WebUI](https://img.shields.io/badge/WebUI-online-22c55e?style=flat-square&logo=googlechrome&logoColor=white)](http://61.184.23.160:2540/)
+
+</div>
+
+---
+
+## 📅 2026-11-11
+
+> 今天共有 **6 个功能提交**，从 `GROUP_MEMBER` 事件恢复，到错误码归档、日志连续浏览、运营数据日期修复，再到群聊退出和消息日志补全。
+
+### ✨ 今日摘要
+
+| 领域 | 更新 | 状态 |
+| --- | --- | :---: |
+| QQ 群事件 | 恢复 `GROUP_MEMBER`、入群申请、群成员变动 | ✅ |
+| WebUI 日志 | 大日志安全读取、20K tail、连续滚动窗口 | ✅ |
+| WebUI 报错 | 错误码归档、30 天保留、默认屏蔽 `40034005` | ✅ |
+| 运营数据 | 相对日期按当前日期计算，过期登录明确提示 | ✅ |
+| 群聊管理 | 右键群聊支持打开 / 退出群聊 | ✅ |
+| 消息日志 | 群消息 INFO 落盘，实时日志捕获 `Bot.makeLog` | ✅ |
+
+### 🕒 提交时间线
+
+```mermaid
+timeline
+    title 2026-11-11 提交时间线
+    20:01 : GROUP_MEMBER 与入群申请恢复
+    20:11 : 大日志尾部读取修复
+    21:17 : 测试插件事件改为只记日志
+    22:53 : 错误码归档 + 日志连续滚动
+    23:00 : 运营数据相对日期修复
+    23:18 : 群聊退出 + 消息日志补全
+```
+
+### 📋 提交总览
 
 | 提交 | 时间 | 类型 | 标题 |
 | --- | --- | --- | --- |
-| `cb40090` | 20:01 | 修复 | 订阅 `GROUP_MEMBER`，恢复入群申请和群成员事件 |
-| `edfad32` | 20:11 | 修复 | WebUI 大日志尾部读取，避免 `Invalid string length` |
-| `90716fa` | 21:17 | 修复 | 测试插件不再自动发送进群/退群消息 |
-| `e2d5f4b` | 22:53 | 功能 | 错误码归档、日志页重构、连续滚动日志浏览 |
-| `e5c4925` | 23:00 | 修复 | 运营数据相对日期改为按当前日期过滤 |
+| `cb40090` | 20:01 | 🛠️ 修复 | 订阅 `GROUP_MEMBER`，恢复入群申请和群成员事件 |
+| `edfad32` | 20:11 | 🛠️ 修复 | WebUI 大日志尾部读取，避免 `Invalid string length` |
+| `90716fa` | 21:17 | 🛠️ 修复 | 测试插件不再自动发送进群/退群消息 |
+| `e2d5f4b` | 22:53 | ✨ 功能 | 错误码归档、日志页重构、连续滚动日志浏览 |
+| `e5c4925` | 23:00 | 🛠️ 修复 | 运营数据相对日期改为按当前日期过滤 |
+| `5663ae3` | 23:18 | ✨ 功能 | 群聊右键退出、消息 INFO 日志补全 |
 
 ---
 
@@ -268,6 +316,90 @@ out.slice(-2, -1)
 
 ---
 
+### `5663ae3` — 群聊退出与消息日志补全
+
+**提交信息：**
+
+```text
+feat(webui): add quit group action and capture message logs
+```
+
+#### 群聊右键菜单
+
+群聊列表中右键群聊，现在有：
+
+- 打开群聊
+- 退出群聊
+
+退出流程：
+
+1. 二次确认群名
+2. WebUI 调用 `POST /api/group/quit`
+3. 服务端通过 `getBotState` 获取机器人自己的 `member_openid`
+4. 调用 `batch_remove_members` 将机器人移出群聊
+5. 清理本地群聊缓存、群统计和 `gl` 群映射
+6. 刷新群列表并自动打开下一个群
+
+> 注意：QQ 官方 `batch_remove_members` 属于内邀/白名单能力；如果机器人没有接口权限，会返回明确错误，不会假装退出成功。
+
+#### 日志页看不到群消息
+
+**原因：**
+
+- `logger.info` 走的是 `message` 分类
+- 原来 `message` 分类只挂了 `stdout`
+- `command` 文件只接收 `warn/error/mark`
+- 所以 WebUI 读取 `command` 历史日志时看不到 INFO 群消息
+
+**修复：**
+
+- TRSS 日志配置新增：
+
+```js
+message: {
+  appenders: ["stdout", "command"],
+  level: cfg.bot.log_level,
+}
+```
+
+- `command` 分类级别改为 `info`
+- 群消息、好友消息、发送消息等 INFO 现在会写入 `command.*.log`
+- 实时日志 hook 从外层 `logger.info` 改为内层 `logger.logger[level]`
+  - `Bot.makeLog` 的 INFO 也能被 WebUI 实时流捕获
+
+**验证：**
+
+- `command.2026-11-11.log` 已出现：
+
+```text
+[23:17:41.733][INFO][3889049339] 群消息：[...] ...
+```
+
+- `/api/logs` 历史日志包含群消息
+- `/api/logs/live` 实时日志包含群消息
+- 旧日志不会回填，只有修复后的新日志包含 INFO
+
+---
+
+## ✅ 验证
+
+| 检查项 | 结果 |
+| --- | :---: |
+| 自动化测试 | **173 通过 / 0 失败** |
+| WebUI | **HTTP 200** |
+| 机器人在线 | **2 / 2** |
+| `error.log` 20K tail | **20000 行** |
+| 大日志分页总量 | **约 744 万行** |
+| 运营数据过期判断 | **昨天 / 今天 / 近 7 天均返回 0 行** |
+| 群消息 INFO 落盘 | **通过** |
+| 实时日志群消息 | **通过** |
+| 错误码归档 | **40034005 默认屏蔽** |
+| 群聊退出 API | **路由与错误处理通过**，实际退出受平台白名单限制 |
+
+> 群聊退出调用的是 QQ 官方 `batch_remove_members`，属于内邀能力。没有权限时 WebUI 会显示平台错误，不会伪造成功状态。
+
+---
+
 ### 部署与推送记录
 
 - 上述改动已部署到生产 TRSS 容器
@@ -279,4 +411,5 @@ out.slice(-2, -1)
 - 仅本地提交，当前未推送：
   - `e2d5f4b`（错误码归档、日志页重构）
   - `e5c4925`（运营数据日期修复）
+  - `5663ae3`（群聊退出、消息日志补全）
   - 本更新日志的提交
