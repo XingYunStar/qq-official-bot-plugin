@@ -1285,9 +1285,29 @@ function renderChatGroupList() {
     el.oncontextmenu = e => {
       e.preventDefault()
       const g = state.chatGroups.find(x => x.group === el.dataset.chatGroup)
-      if (g) showCtxMenu(e.clientX, e.clientY, [{ label: "打开群聊", action: () => openChat(g) }])
+      if (g) showCtxMenu(e.clientX, e.clientY, [
+        { label: "打开群聊", action: () => openChat(g) },
+        { sep: true },
+        { label: "退出群聊", danger: true, action: () => quitChatGroup(g) },
+      ])
     }
   })
+}
+async function quitChatGroup(g) {
+  const name = g.name || g.group
+  if (!confirm(`确定让机器人退出群聊「${name}」吗？\n退出后将不再接收该群消息。`)) return
+  try {
+    await api("/api/group/quit", { method: "POST", body: JSON.stringify({ bot: state.bot, group: g.group }) })
+    toast(`已退出群聊：${name}`)
+    if (state.chatGroup === g.group) {
+      state.chatGroup = ""
+      closeChatStream()
+      $("#chatMessages").innerHTML = `<div class="chat-empty">已退出群聊，正在刷新群列表…</div>`
+    }
+    await loadChatGroups()
+  } catch (e) {
+    toast(`退出群聊失败：${e.message}`)
+  }
 }
 async function loadChatGroups(silent = false) {
   try {
