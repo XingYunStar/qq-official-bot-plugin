@@ -440,7 +440,7 @@ function adapterGroupStatsName(botId, fullId) {
 }
 function humanizeLogLine(line) {
   if (typeof line !== "string") return line
-  let out = line.replace(/\[(\d+):([A-Za-z0-9_-]{8,}), (\d+):([A-Za-z0-9_-]{8,})\]/g, (m, b1, g1, b2, u2) => {
+  let out = stripAnsi(line).replace(/\[(\d+):([A-Za-z0-9_-]{8,}), (\d+):([A-Za-z0-9_-]{8,})\]/g, (m, b1, g1, b2, u2) => {
     const groupFull = `${b1}:${g1}`
     const userFull = `${b2}:${u2}`
     const gname = lookupGroupName(b1, groupFull)
