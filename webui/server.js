@@ -111,7 +111,7 @@ async function readLogPage(filePath, { offset = 0, limit = 1000, center = null }
 }
 
 /** 从文件尾部按块读取，足够行数就停止，避免大日志触发 Invalid string length */
-async function searchLogFile(filePath, query, { limit = 500, caseSensitive = false } = {}) {
+async function searchLogFile(filePath, query, { limit = 500, caseSensitive = false, signal } = {}) {
   const q = String(query || "").trim()
   if (!q) throw new Error("搜索内容不能为空")
   const needle = caseSensitive ? q : q.toLowerCase()
@@ -123,6 +123,7 @@ async function searchLogFile(filePath, query, { limit = 500, caseSensitive = fal
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
   try {
     for await (const line of rl) {
+      if (signal?.aborted) break
       lineNo++
       const haystack = caseSensitive ? line : line.toLowerCase()
       if (!haystack.includes(needle)) continue
@@ -133,7 +134,7 @@ async function searchLogFile(filePath, query, { limit = 500, caseSensitive = fal
     rl.close()
     stream.destroy()
   }
-  return { query: q, caseSensitive: !!caseSensitive, total: lineNo, found, matches, truncated: found > matches.length }
+  return { query: q, caseSensitive: !!caseSensitive, total: lineNo, found, matches, truncated: found > matches.length, cancelled: !!signal?.aborted }
 }
 
 async function readLogTail(filePath, maxLines = 200) {
@@ -894,8 +895,21 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit")) || 500))
         const caseSensitive = url.searchParams.get("case") === "1"
         if (!query.trim()) return json(res, 400, { error: "搜索内容不能为空" })
-        try { return json(res, 200, { file, ...await searchLogFile(path.join("logs", file), query, { limit, caseSensitive }) }) }
-        catch (err) { return json(res, 404, { error: String(err.message || err) }) }
+        const controller = new AbortController()
+        const abort = () => controller.abort()
+        req.on("aborted", abort)
+        res.on("close", abort)
+        try {
+          const result = await searchLogFile(path.join("logs", file), query, { limit, caseSensitive, signal: controller.signal })
+          if (controller.signal.aborted || res.writableEnded) return
+          return json(res, 200, { file, ...result })
+        } catch (err) {
+          if (controller.signal.aborted || res.writableEnded) return
+          return json(res, 404, { error: String(err.message || err) })
+        } finally {
+          req.off("aborted", abort)
+          res.off("close", abort)
+        }
       }
       if (pathname === "/api/logs/page") {
         const file = path.basename(url.searchParams.get("file") || "error.log")
