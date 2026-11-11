@@ -703,7 +703,8 @@ function renderErrorList(data) {
         <span class="error-bot">${esc(e.bot || "QQBot")}</span>
       </div>
       <div class="error-msg">${esc(e.message || "(无错误消息)")}</div>
-      ${e.detail ? `<details><summary>查看堆栈 / 详情</summary><div class="error-detail">${esc(e.detail)}</div></details>` : ""}
+      ${e.payload ? `<div class="error-payload"><div class="error-payload-title">发送内容 / 调用参数</div><pre>${esc(e.payload)}</pre></div>` : ""}
+      ${e.detail ? `<details><summary>查看完整调用参数 / 请求 / 堆栈</summary><div class="error-detail">${esc(e.detail)}</div></details>` : (e.context ? `<details><summary>查看调用参数 / 堆栈</summary><div class="error-detail">${esc(e.context)}</div></details>` : "")}
     </article>`).join("")
 }
 async function loadErrorList(append = false) {
