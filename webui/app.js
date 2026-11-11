@@ -77,6 +77,8 @@ let state = {
   paletteIndex: 0, paletteActions: [], chatGroup: "", chatES: null, chatLastId: 0, chatImages: [], sysTimer: null,
   chatRefreshTimer: null, chatGroupsSig: "", chatMembersSig: "",
   logLevel: localStorage.getItem("qqbot_log_level") || "info", logRenderTimer: null, logRenderScroll: false,
+  logWindowStart: 0, logWindowEnd: 0, logWindowTotal: 0, logWindowMode: "none", logWindowLoading: false,
+  errorCode: "all", errorCodes: [], errorLimit: 200, errorEntries: [], errorOffset: 0, errorHasMore: false, errorTotal: 0,
   chatMembers: [], chatMembersLocalOnly: false, chatBotRole: "", chatReply: null, chatMentions: [], chatMap: new Map(),
 }
 const toast = msg => { const t=$("#toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2200) }
@@ -173,6 +175,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   if (innerWidth <= 900) document.body.classList.remove("nav-open")
   if (b.dataset.tab === "stats") { loadStats(state.range); loadGroupStats() }
   if (b.dataset.tab === "logs") { loadLogs(); startLogLive() }
+  if (b.dataset.tab === "errors") loadErrors()
   if (b.dataset.tab === "materials") loadMaterials()
   if (b.dataset.tab === "groups") loadGroups()
   if (b.dataset.tab === "chat") { loadChatGroups(); startChatRefresh() }
@@ -649,6 +652,84 @@ $("#cfgSave").onclick = async () => {
   } catch (e) { toast(e.message) }
 }
 
+/* error code archive */
+function errTime(ts) {
+  try { return new Date(ts).toLocaleString("zh-CN", { hour12: false }) } catch { return "" }
+}
+function renderErrorList(data) {
+  const entries = data.entries || []
+  if (!entries.length) {
+    $("#errList").innerHTML = `<div class="card empty-state"><div class="empty-ico"><svg viewBox="0 0 24 24"><path d="M10.3 3.8L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></div><div><strong>没有匹配的报错</strong><p>当前错误码暂无记录，或记录已超过 30 天被清理。</p></div></div>`
+    return
+  }
+  $("#errList").innerHTML = entries.map(e => `
+    <article class="error-item">
+      <div class="error-head">
+        <span class="error-code">${esc(e.code || "unknown")}</span>
+        <span class="error-time">${esc(errTime(e.time))}</span>
+        <span class="error-bot">${esc(e.bot || "QQBot")}</span>
+      </div>
+      <div class="error-msg">${esc(e.message || "(无错误消息)")}</div>
+      ${e.detail ? `<details><summary>查看堆栈 / 详情</summary><div class="error-detail">${esc(e.detail)}</div></details>` : ""}
+    </article>`).join("")
+}
+async function loadErrorList(append = false) {
+  try {
+    const code = $("#errCodeSel").value || state.errorCode || "all"
+    state.errorCode = code
+    const limit = Math.min(500, Math.max(1, Number($("#errLimit").value) || 200))
+    state.errorLimit = limit
+    const offset = append ? state.errorOffset : 0
+    const data = await api(`/api/error-log?code=${encodeURIComponent(code)}&limit=${limit}&offset=${offset}`)
+    state.errorEntries = append ? [...state.errorEntries, ...(data.entries || [])] : (data.entries || [])
+    state.errorOffset = offset + (data.entries?.length || 0)
+    state.errorHasMore = !!data.hasMore
+    state.errorTotal = data.total || 0
+    renderErrorList({ entries: state.errorEntries })
+    $("#errPage").textContent = `显示 ${state.errorEntries.length} / 共 ${state.errorTotal} 条`
+    $("#errMore").classList.toggle("hide", !state.errorHasMore)
+  } catch (e) {
+    if (!append) $("#errList").innerHTML = `<div class="muted" style="padding:16px">${esc(e.message)}</div>`
+    toast(e.message)
+  }
+}
+async function loadErrors() {
+  try {
+    const data = await api("/api/error-log/codes")
+    state.errorCodes = data.codes || []
+    $("#errIgnored").value = (data.ignoredCodes || []).join(", ")
+    $("#errStats").textContent = `${data.total || 0} 条 · ${state.errorCodes.length} 个错误码`
+    $("#errRetention").textContent = `保留 ${data.retentionDays || 30} 天`
+    const options = [`<option value="all">全部错误码（${data.total || 0}）</option>`]
+      .concat(state.errorCodes.map(c => `<option value="${esc(c.code)}">${esc(c.code)}（${c.count}）${c.message ? " · " + esc(c.message.slice(0, 60)) : ""}</option>`))
+    const sel = $("#errCodeSel")
+    sel.innerHTML = options.join("")
+    if (![...sel.options].some(o => o.value === state.errorCode)) state.errorCode = "all"
+    sel.value = state.errorCode
+    state.errorEntries = []
+    state.errorOffset = 0
+    await loadErrorList(false)
+  } catch (e) {
+    $("#errStats").textContent = e.message
+    $("#errList").innerHTML = ""
+  }
+}
+$("#errCodeSel").onchange = () => { state.errorCode = $("#errCodeSel").value; state.errorOffset = 0; loadErrorList(false) }
+$("#errLoad").onclick = () => loadErrorList(false)
+$("#errRefresh").onclick = loadErrors
+$("#errLimit").onchange = () => { state.errorOffset = 0; loadErrorList(false) }
+$("#errMore").onclick = () => loadErrorList(true)
+$("#errIgnoreSave").onclick = async () => {
+  try {
+    const ignoredCodes = $("#errIgnored").value.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean)
+    const bad = ignoredCodes.find(x => !/^\d{5,}$/.test(x))
+    if (bad) throw new Error(`错误码格式不正确：${bad}`)
+    await api("/api/error-log/config", { method: "POST", body: JSON.stringify({ ignoredCodes }) })
+    toast("屏蔽码已保存，历史对应记录已移除")
+    await loadErrors()
+  } catch (e) { toast(e.message) }
+}
+
 /* logs */
 async function loadLogs() {
   try {
@@ -673,15 +754,41 @@ function renderLogs(scroll = false) {
   const el = $("#logText")
   const q = ($("#logSearch")?.value || "").trim()
   const min = LOG_MIN[state.logLevel] ?? 2
-  let lines = state.logLines.filter(line => logLevelOf(line) >= min)
-  if (q) lines = lines.filter(l => l.toLowerCase().includes(q.toLowerCase()))
+  let items = state.logLines.map((line, index) => ({ line, abs: state.logWindowStart + index }))
+    .filter(item => logLevelOf(item.line) >= min)
+  if (q) items = items.filter(item => item.line.toLowerCase().includes(q.toLowerCase()))
   const re = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig") : null
-  el.innerHTML = lines.map(line => {
+  el.innerHTML = items.map(({ line, abs }) => {
     let html = esc(line) || " "
     if (re) html = html.replace(re, m => `<mark>${m}</mark>`)
-    return `<span class="${logClass(line)}">${html}</span>`
+    return `<span data-log-line="${abs}" class="${logClass(line)}">${html}</span>`
   }).join("\n")
   if (scroll) el.scrollTop = el.scrollHeight
+}
+function captureLogAnchor() {
+  const el = $("#logText")
+  const box = el.getBoundingClientRect()
+  for (const span of el.querySelectorAll("span[data-log-line]")) {
+    const rect = span.getBoundingClientRect()
+    const top = rect.top - box.top + el.scrollTop
+    if (top + rect.height >= el.scrollTop) {
+      return { line: Number(span.dataset.logLine), offset: el.scrollTop - top }
+    }
+  }
+  return null
+}
+function restoreLogAnchor(anchor, fallback = 0) {
+  const el = $("#logText")
+  if (anchor) {
+    const span = el.querySelector(`span[data-log-line="${anchor.line}"]`)
+    if (span) {
+      const box = el.getBoundingClientRect()
+      const top = span.getBoundingClientRect().top - box.top + el.scrollTop
+      el.scrollTop = Math.max(0, top + anchor.offset)
+      return
+    }
+  }
+  el.scrollTop = Math.max(0, fallback)
 }
 $("#logLevel").value = state.logLevel
 $("#logLevel").onchange = () => {
@@ -690,23 +797,109 @@ $("#logLevel").onchange = () => {
   if (state.logES) { stopLogLive(); startLogLive() }
   else renderLogs()
 }
-$("#logLoad").onclick = async () => {
-  stopLogLive()
-  try {
-    const data = await api("/api/logs?file=" + encodeURIComponent($("#logFile").value) + "&tail=" + $("#logTail").value)
-    state.logLines = data.lines || []
-    $("#logPause").classList.remove("on")
-    $("#logPause").textContent = "暂停"
-    state.logPaused = false
-    renderLogs(true)
-  } catch (e) { toast(e.message) }
+const LOG_WINDOW_MAX = 3000
+const LOG_WINDOW_STEP = 1000
+function updateLogWindowStatus(extra = "") {
+  const file = $("#logFile").value || "日志"
+  $("#logStatus").textContent = `${file} · 已加载第 ${state.logWindowStart + 1}-${state.logWindowEnd} 行 / 共 ${state.logWindowTotal} 行 · 当前窗口 ${state.logLines.length} 行${extra}`
 }
-$("#logFile").onchange = () => $("#logLoad").click()
+async function loadInitialLog() {
+  stopLogLive()
+  state.logWindowMode = "window"
+  state.logWindowLoading = true
+  const file = $("#logFile").value
+  const initial = Math.min(LOG_WINDOW_MAX, Math.max(100, Number($("#logTail").value) || 2000))
+  $("#logTail").value = initial
+  $("#logStatus").textContent = `正在读取 ${file}…`
+  try {
+    const data = await api(`/api/logs/page?file=${encodeURIComponent(file)}&offset=0&limit=${initial}`)
+    state.logLines = data.lines || []
+    state.logWindowStart = data.start || 0
+    state.logWindowEnd = data.end || 0
+    state.logWindowTotal = data.total || 0
+    state.logPaused = false
+    $("#logPause").disabled = true
+    $("#logPause").classList.remove("on")
+    $("#logPause").textContent = "暂停刷新"
+    renderLogs(true)
+    updateLogWindowStatus()
+  } catch (e) {
+    $("#logStatus").textContent = `加载失败：${e.message}`
+    toast(e.message)
+  } finally {
+    state.logWindowLoading = false
+  }
+}
+async function loadOlderWindow() {
+  if (state.logWindowMode !== "window" || state.logWindowLoading || state.logWindowStart <= 0) return
+  state.logWindowLoading = true
+  const el = $("#logText")
+  const beforeHeight = el.scrollHeight
+  const beforeTop = el.scrollTop
+  try {
+    const limit = Math.min(LOG_WINDOW_STEP, state.logWindowStart)
+    const data = await api(`/api/logs/page?file=${encodeURIComponent($("#logFile").value)}&offset=${state.logWindowTotal - state.logWindowStart}&limit=${limit}`)
+    let incoming = data.lines || []
+    const drop = Math.max(0, (data.end || 0) - state.logWindowStart)
+    if (drop) incoming = incoming.slice(0, Math.max(0, incoming.length - drop))
+    const anchor = captureLogAnchor()
+    state.logLines = [...incoming, ...state.logLines]
+    state.logWindowStart = data.start || 0
+    state.logWindowTotal = data.total || state.logWindowTotal
+    if (state.logLines.length > LOG_WINDOW_MAX) state.logLines.splice(LOG_WINDOW_MAX)
+    state.logWindowEnd = state.logWindowStart + state.logLines.length
+    renderLogs()
+    restoreLogAnchor(anchor, beforeTop)
+    updateLogWindowStatus(" · 已自动加载更早范围")
+  } catch (e) {
+    toast(e.message)
+  } finally {
+    state.logWindowLoading = false
+  }
+}
+async function loadNewerWindow() {
+  if (state.logWindowMode !== "window" || state.logWindowLoading || state.logWindowEnd >= state.logWindowTotal) return
+  state.logWindowLoading = true
+  const el = $("#logText")
+  try {
+    const currentEnd = state.logWindowEnd
+    const limit = Math.min(LOG_WINDOW_STEP, state.logWindowTotal - currentEnd)
+    const offset = Math.max(0, state.logWindowTotal - (currentEnd + limit))
+    const data = await api(`/api/logs/page?file=${encodeURIComponent($("#logFile").value)}&offset=${offset}&limit=${limit}`)
+    let incoming = data.lines || []
+    const overlap = Math.max(0, currentEnd - (data.start || 0))
+    if (overlap) incoming = incoming.slice(overlap)
+    const anchor = captureLogAnchor()
+    state.logLines.push(...incoming)
+    state.logWindowEnd = currentEnd + incoming.length
+    state.logWindowTotal = data.total || state.logWindowTotal
+    if (state.logLines.length > LOG_WINDOW_MAX) {
+      const excess = state.logLines.length - LOG_WINDOW_MAX
+      state.logLines.splice(0, excess)
+      state.logWindowStart += excess
+    }
+    renderLogs()
+    restoreLogAnchor(anchor, el.scrollTop)
+    updateLogWindowStatus(" · 已自动加载更新范围")
+  } catch (e) {
+    toast(e.message)
+  } finally {
+    state.logWindowLoading = false
+  }
+}
+$("#logText").onscroll = () => {
+  if (state.logWindowMode !== "window" || state.logWindowLoading) return
+  const el = $("#logText")
+  if (el.scrollTop < 60 && state.logWindowStart > 0) loadOlderWindow()
+  else if (el.scrollHeight - el.scrollTop - el.clientHeight < 60 && state.logWindowEnd < state.logWindowTotal) loadNewerWindow()
+}
+$("#logLoad").onclick = loadInitialLog
+$("#logFile").onchange = loadInitialLog
 $("#logSearch").oninput = () => renderLogs()
 $("#logPause").onclick = () => {
   state.logPaused = !state.logPaused
   $("#logPause").classList.toggle("on", state.logPaused)
-  $("#logPause").textContent = state.logPaused ? "继续" : "暂停"
+  $("#logPause").textContent = state.logPaused ? "继续刷新" : "暂停刷新"
   if (!state.logPaused) renderLogs(true)
 }
 $("#logDownload").onclick = () => {
@@ -717,10 +910,17 @@ $("#logDownload").onclick = () => {
   a.click()
   URL.revokeObjectURL(a.href)
 }
+
 function stopLogLive() {
   if (state.logES) { state.logES.close(); state.logES = null }
   if (state.logRenderTimer) { clearTimeout(state.logRenderTimer); state.logRenderTimer = null }
-  $("#logLive").textContent = "实时：关"
+  $("#logLive").textContent = "开启实时"
+  $("#logPause").disabled = true
+  if (state.logPaused) {
+    state.logPaused = false
+    $("#logPause").classList.remove("on")
+    $("#logPause").textContent = "暂停刷新"
+  }
 }
 function scheduleLogRender(scroll = false) {
   state.logRenderScroll = state.logRenderScroll || scroll
@@ -740,6 +940,7 @@ function pushLogLines(lines) {
 function startLogLive() {
   if (state.logES) return
   state.logLines = []
+  state.logWindowMode = "live"
   renderLogs()
   const es = new EventSource(`/api/logs/live?level=${encodeURIComponent(state.logLevel)}`)
   es.onmessage = ev => {
@@ -752,7 +953,9 @@ function startLogLive() {
   }
   es.onerror = () => { pushLogLines(["[实时日志连接断开]"]); renderLogs(true); stopLogLive() }
   state.logES = es
-  $("#logLive").textContent = "实时：开"
+  $("#logLive").textContent = "停止实时"
+  $("#logPause").disabled = false
+  $("#logStatus").textContent = "实时日志已开启 · 仅保留最近渲染的日志"
 }
 $("#logLive").onclick = () => {
   if (state.logES) stopLogLive()
@@ -1941,6 +2144,7 @@ const TAB_META = {
   stats: ["运营数据", "机器人增长、消息与用户活跃度总览"],
   config: ["配置中心", "在线编辑 QQBot 与 TRSS YAML 配置"],
   logs: ["运行日志", "历史日志与 SSE 实时日志"],
+  errors: ["机器人报错", "按错误码查看近 30 天 QQBot 报错"],
   system: ["系统状态", "负载、CPU、GPU、内存、SWAP、磁盘与网络"],
   materials: ["素材管理", "Markdown / 图片素材复用与清理"],
   groups: ["群管理", "成员、禁言、踢人与黑名单"],
