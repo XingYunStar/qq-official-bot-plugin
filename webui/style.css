@@ -619,3 +619,18 @@ body[data-tab="chat"]{background:var(--bg)}
 
 
 #statsTip.stats-warning{color:var(--bad);background:rgba(251,113,133,.08);border:1px solid rgba(251,113,133,.2);border-radius:8px;padding:8px 10px}
+
+/* ---------- full-file log search ---------- */
+.log-inline-check{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);white-space:nowrap}
+.log-inline-check input{width:auto;padding:0}
+.log-search-panel{margin:0 0 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+.log-search-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:11px}
+.log-search-head strong{font-size:11px;color:var(--text)}
+.log-search-head button{padding:4px 8px;font-size:10px}
+.log-search-results{max-height:190px;overflow:auto}
+.log-search-result{display:flex;gap:10px;width:100%;padding:7px 12px;border:0;border-bottom:1px solid rgba(148,163,184,.08);background:transparent;color:var(--text);text-align:left;font:11px/1.45 var(--mono);cursor:pointer}
+.log-search-result:hover{background:rgba(139,92,246,.1)}
+.log-search-result:last-child{border-bottom:0}
+.log-search-result .ln{flex:0 0 62px;color:var(--brand-3);opacity:.85}
+.log-search-result .tx{min-width:0;white-space:pre-wrap;word-break:break-all;color:var(--muted)}
+.log-hit{background:rgba(250,204,21,.22);border-radius:3px}

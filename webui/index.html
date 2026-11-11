@@ -183,11 +183,21 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
       </div>
       <div class="log-group">
         <div class="log-group-title">当前视图</div>
-        <input id="logSearch" placeholder="在当前已加载日志中搜索…" style="min-width:220px">
+        <input id="logSearch" placeholder="全文件搜索…" style="min-width:200px">
+        <label class="log-inline-check"><input id="logSearchCase" type="checkbox"> 区分大小写</label>
+        <button id="logSearchBtn">搜索</button>
+        <button class="ghost" id="logSearchClear">清除</button>
         <button class="ghost" id="logDownload">下载当前内容</button>
       </div>
     </div>
     <div class="log-status"><span id="logStatus">尚未加载日志</span><span class="muted">滚动到顶部/底部自动加载；窗口最多保留 3000 行</span></div>
+    <div class="log-search-panel hide" id="logSearchPanel">
+      <div class="log-search-head">
+        <strong id="logSearchTitle">全文件搜索结果</strong>
+        <button class="ghost" id="logSearchClose">关闭结果</button>
+      </div>
+      <div class="log-search-results" id="logSearchResults"></div>
+    </div>
     <pre class="log" id="logText">选择上方文件后点击「加载日志」，或点击「开启实时」监听全部插件日志</pre>
   </section>
 
