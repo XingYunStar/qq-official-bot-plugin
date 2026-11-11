@@ -610,32 +610,22 @@ export class QQBotAdapterTest extends plugin {
 
 // ---- 事件测试 ----
 
-// 群成员进群
-Bot.on("notice.group.increase", async e => {
+// 群成员进群：只记日志，不自动发消息，避免大群刷屏
+Bot.on("notice.group.increase", e => {
   if (!isQQBot(e)) return
-  try {
-    await e.reply(`欢迎 ${e.user_id} 加入本群（notice.group.increase 测试）`)
-  } catch (err) {
-    logger.error(`[QQBot测试] 进群欢迎失败：${errText(err)}`)
-  }
   logger.mark(`[QQBot测试] 群成员进群：${e.group_id} ${e.user_id} 操作人：${e.operator_id || "无"}`)
 })
 
-// 群成员退群
+// 群成员退群：只记日志
 Bot.on("notice.group.decrease", e => {
   if (!isQQBot(e)) return
   logger.mark(`[QQBot测试] 群成员退群：${e.group_id} ${e.user_id}`)
 })
 
-// 机器人被拉进群
-Bot.on("notice.group.bot.increase", async e => {
+// 机器人被拉进群：只记日志，不自动发消息
+Bot.on("notice.group.bot.increase", e => {
   if (!isQQBot(e)) return
   logger.mark(`[QQBot测试] 机器人被拉入群：${e.group_id}`)
-  try {
-    await e.reply("QQBot 已加入本群（notice.group.bot.increase 测试）")
-  } catch (err) {
-    logger.error(`[QQBot测试] 入群欢迎失败：${errText(err)}`)
-  }
 })
 
 // 入群申请（需要机器人是管理员，并且 WebSocket 订阅 GROUP_MEMBER / 1<<24）
