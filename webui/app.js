@@ -78,7 +78,7 @@ let state = {
   chatRefreshTimer: null, chatGroupsSig: "", chatMembersSig: "",
   logLevel: localStorage.getItem("qqbot_log_level") || "info", logRenderTimer: null, logRenderScroll: false,
   logWindowStart: 0, logWindowEnd: 0, logWindowTotal: 0, logWindowMode: "none", logWindowLoading: false,
-  logHighlightQuery: "", logFocusLine: -1, logSearching: false,
+  logHighlightQuery: "", logFocusLine: -1, logSearching: false, logSearchController: null,
   errorCode: "all", errorCodes: [], errorLimit: 200, errorEntries: [], errorOffset: 0, errorHasMore: false, errorTotal: 0,
   chatMembers: [], chatMembersLocalOnly: false, chatBotRole: "", chatReply: null, chatMentions: [], chatMap: new Map(),
 }
@@ -886,7 +886,21 @@ function scrollToLogLine(abs) {
   const top = span.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
   el.scrollTop = Math.max(0, top - el.clientHeight / 2 + span.offsetHeight / 2)
 }
+function stopLogSearch(message = "搜索已停止") {
+  if (state.logSearchController) {
+    state.logSearchController.abort()
+    state.logSearchController = null
+  }
+  state.logSearching = false
+  $("#logSearchStop")?.classList.add("hide")
+  $("#logSearchBtn").disabled = false
+  if ($("#logSearchPanel") && !$("#logSearchPanel").classList.contains("hide")) {
+    $("#logSearchTitle").textContent = message
+    $("#logSearchResults").innerHTML = `<div class="muted" style="padding:14px">${esc(message)}，可重新输入关键词搜索。</div>`
+  }
+}
 function closeLogSearch(keepQuery = false) {
+  stopLogSearch("搜索已停止")
   $("#logSearchPanel").classList.add("hide")
   if (!keepQuery) {
     state.logHighlightQuery = ""
@@ -916,18 +930,28 @@ async function searchLogs() {
   if (!q) return toast("请输入要搜索的内容")
   if (state.logSearching) return
   state.logSearching = true
+  const controller = new AbortController()
+  state.logSearchController = controller
   $("#logSearchBtn").disabled = true
+  $("#logSearchStop").classList.remove("hide")
   $("#logSearchPanel").classList.remove("hide")
   $("#logSearchTitle").textContent = `正在扫描整个 ${file}…`
   $("#logSearchResults").innerHTML = `<div class="muted" style="padding:14px">全文件扫描中，10M 行日志可能需要几秒…</div>`
   try {
-    const data = await api(`/api/logs/search?file=${encodeURIComponent(file)}&q=${encodeURIComponent(q)}&case=${$("#logSearchCase").checked ? 1 : 0}`)
+    const data = await api(`/api/logs/search?file=${encodeURIComponent(file)}&q=${encodeURIComponent(q)}&case=${$("#logSearchCase").checked ? 1 : 0}`, { signal: controller.signal })
+    if (controller.signal.aborted) return
     renderLogSearchResults(data)
   } catch (e) {
-    $("#logSearchTitle").textContent = `搜索失败：${e.message}`
-    $("#logSearchResults").innerHTML = ""
+    if (controller.signal.aborted || e.name === "AbortError") {
+      stopLogSearch("搜索已停止")
+    } else {
+      $("#logSearchTitle").textContent = `搜索失败：${e.message}`
+      $("#logSearchResults").innerHTML = ""
+    }
   } finally {
+    if (state.logSearchController === controller) state.logSearchController = null
     state.logSearching = false
+    $("#logSearchStop").classList.add("hide")
     $("#logSearchBtn").disabled = false
   }
 }
@@ -1086,6 +1110,7 @@ $("#logText").onscroll = () => {
 $("#logLoad").onclick = loadInitialLog
 $("#logFile").onchange = loadInitialLog
 $("#logSearchBtn").onclick = searchLogs
+$("#logSearchStop").onclick = () => stopLogSearch("搜索已停止")
 $("#logSearch").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); searchLogs() } }
 $("#logSearchClear").onclick = () => { closeLogSearch(); $("#logSearchPanel").classList.add("hide") }
 $("#logSearchClose").onclick = () => closeLogSearch()
