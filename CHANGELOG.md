@@ -15,7 +15,6 @@
 [![TRSS-Yunzai](https://img.shields.io/badge/TRSS--Yunzai-3.1.3-8b5cf6?style=for-the-badge)](https://github.com/TimeRainStarSky/Yunzai)
 [![Node](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-173%20passed-22c55e?style=flat-square&logo=checkmarx&logoColor=white)](#-验证)
-[![WebUI](https://img.shields.io/badge/WebUI-online-22c55e?style=flat-square&logo=googlechrome&logoColor=white)](http://<服务器IP>:2540/)
 
 </div>
 
@@ -23,7 +22,7 @@
 
 ## 📅 2026-11-15
 
-> 整理 `dev` 相对 `main` 的历史提交，将本轮 WebUI、测试插件和 README 更新合并为一个提交。
+> 整理 `dev` 相对 `main` 的历史提交，将本轮 WebUI、测试插件和 README 更新合并为一个提交；重建提交历史，移除包含服务器 IP 的旧记录。
 
 ### ✨ 本次汇总
 
@@ -770,7 +769,7 @@ fix(webui): re-arm live logger after YePanel reset
 ### 部署与推送记录
 
 - 上述改动已部署到生产 TRSS 容器
-- WebUI 地址：`http://<服务器IP>:2540/`
+- WebUI 地址：`http://<服务器IP>:2580/`
 - 已推送 GitHub：
   - `cb40090`
   - `edfad32`

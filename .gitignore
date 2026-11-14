@@ -4,3 +4,13 @@ data/
 logs/
 *.log
 .DS_Store
+
+# 可能包含服务器 IP / 密钥 / 本地环境信息的文件，禁止提交
+.env
+.env.*
+*.pem
+*.key
+*.crt
+ip.txt
+server-ip*
+local-ip*
