@@ -16,6 +16,7 @@ import { GroupStats } from "./components/group-stats.js"
 import { GroupChat, normalizeChatContent } from "./components/group-chat.js"
 import { MemberCache } from "./components/member-cache.js"
 import { ErrorStore } from "./components/error-store.js"
+import { ContentGuard } from "./components/content-guard.js"
 import { parseTokenLine, formatTokenLine, parseCompactTokenLine, fetchBotQQ } from "./components/token.js"
 import { normalizeCard, cardToText, splitCardMessages } from "./components/card.js"
 import QQBot from "qq-official-bot"
@@ -181,6 +182,7 @@ const adapter = new (class QQBotAdapter {
     this.materialMd5 = {}
     this.materialMeta = {}
     this.errorStore = new ErrorStore()
+    this.contentGuard = new ContentGuard()
     // GROUP_MEMBER intent 若平台未授权，运行期自动降级一次，避免反复 4014
     this.groupMemberDenied = {}
     this.materialReady = {}
@@ -224,6 +226,33 @@ const adapter = new (class QQBotAdapter {
 
   splitCardMessages(msg) {
     return splitCardMessages(msg)
+  }
+
+  /**
+   * SDK 的 MessageBuilder 不允许 image/file 等富媒体与 markdown 出现在同一个
+   * 消息片段里（消息正文片段冲突）。旧版 QQBot-Plugin 会自动拆开，这里也做兼容：
+   * 遇到 markdown + 富媒体时，先发富媒体，再发 markdown。
+   */
+  splitMixedMarkdownMessages(messages) {
+    const mediaTypes = new Set(["image", "file", "record", "video", "audio"])
+    const out = []
+    for (const part of messages) {
+      if (!Array.isArray(part)) {
+        out.push(part)
+        continue
+      }
+      const hasMarkdown = part.some(i => i?.type === "markdown")
+      const hasMedia = part.some(i => mediaTypes.has(i?.type))
+      if (!hasMarkdown || !hasMedia) {
+        out.push(part)
+        continue
+      }
+      const mediaPart = part.filter(i => i?.type !== "markdown" && i?.type !== "keyboard" && i?.type !== "button")
+      const markdownPart = part.filter(i => i?.type === "markdown" || i?.type === "keyboard" || i?.type === "button")
+      if (mediaPart.length) out.push(mediaPart)
+      if (markdownPart.length) out.push(markdownPart)
+    }
+    return out
   }
 
   toSdkMessage(msg, ctx) {
@@ -601,6 +630,12 @@ const adapter = new (class QQBotAdapter {
           content += `${des}${url}`
           break
         }
+        case "card": {
+          const card = this.normalizeCard(i)
+          if (card) messages.push([card])
+          else content += await this.makeRawMarkdownText(data, this.cardToText(i), keyboard && button)
+          break
+        }
         case "markdown":
           if (typeof i.data === "object") messages.push([{ type: "markdown", ...i.data }])
           else content += i.data
@@ -887,6 +922,19 @@ const adapter = new (class QQBotAdapter {
         case "reply":
           reply = i
           continue
+        case "card": {
+          const card = this.normalizeCard(i)
+          if (card) {
+            if (message.length) {
+              messages.push(message)
+              message = []
+            }
+            messages.push([card])
+            continue
+          }
+          i = { type: "text", text: this.cardToText(i) }
+          break
+        }
         case "markdown":
           if (typeof i.data === "object") i = { type: "markdown", ...i.data }
           else i = { type: "markdown", content: i.data }
@@ -961,6 +1009,12 @@ const adapter = new (class QQBotAdapter {
   async sendMsg(data, send, msg) {
     const rets = { message_id: [], data: [], error: [] },
       source = {}
+    const blocked = this.contentGuard?.isBlocked(data.self_id, msg)
+    if (blocked) {
+      Bot.makeLog("warn", ["内容曾被判定违规(40034006)，已跳过发送", blocked.preview], data.self_id)
+      rets.error.push(new Error("消息内容曾被判定违规(40034006)，已停止发送"))
+      return rets
+    }
     // 群聊被动回复：用 110 秒内最旧的消息 ID（每条最多回复 5 次），没有则走主动
     const passiveId = this.pickMsgId(data)
     if (passiveId) source.id = passiveId
@@ -989,8 +1043,13 @@ const adapter = new (class QQBotAdapter {
           }
         } catch (err) {
           const logArgs = ["发送消息错误", i, err]
+          const code = this.errorStore?.codeOf(logArgs) || ""
           const ignored = this.errorStore?.isIgnored(logArgs)
           this.errorStore?.capture(data.self_id, logArgs)
+          if (code === "40034006") {
+            const record = this.contentGuard?.block(data.self_id, msg, { code })
+            if (record) Bot.makeLog("warn", ["40034006 已记录违规内容，后续相同内容将停止发送", record.preview], data.self_id)
+          }
           if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
           rets.error.push(err)
           return false
@@ -998,12 +1057,42 @@ const adapter = new (class QQBotAdapter {
     }
 
     msgs = []
-    for (const part of this.splitCardMessages(msg))
-      if (part.length === 1 && part[0]?.type === "card") msgs.push(part)
-      else msgs.push(...(await this.buildMessages(data, part, source)))
+    for (const part of this.splitCardMessages(msg)) {
+      if (part.length === 1 && part[0]?.type === "card") {
+        msgs.push(part)
+        continue
+      }
+      // 卡片 + 内嵌键盘必须放在同一条消息的 payload 里，否则 SDK 会把按钮拆丢。
+      if (part.some(i => i?.type === "card")) {
+        const card = this.normalizeCard(part.find(i => i?.type === "card"))
+        const keyboardEls = part.filter(i => i?.type === "button" || (i?.type === "raw" && i.data?.type === "keyboard"))
+        if (card && keyboardEls.length) {
+          const rows = []
+          for (const el of keyboardEls) {
+            if (el.type === "button") {
+              const buttonRows = Array.isArray(el.data) ? el.data : [el.data]
+              rows.push(...this.makeButtons(data, buttonRows))
+            } else {
+              rows.push(...(el.data?.content?.rows || el.data?.rows || []))
+            }
+          }
+          if (rows.length) {
+            msgs.push([
+              card,
+              { type: "keyboard", data: { content: { rows } } },
+            ])
+            continue
+          }
+        }
+      }
+      msgs.push(...(await this.buildMessages(data, part, source)))
+    }
+
+    msgs = this.splitMixedMarkdownMessages(msgs)
 
     if ((await sendMsg()) === false) {
-      msgs = await this.makeMsg(data, msg, source)
+      if (this.contentGuard?.isBlocked(data.self_id, msg)) return rets
+      msgs = this.splitMixedMarkdownMessages(await this.makeMsg(data, msg, source))
       await sendMsg()
     }
 
@@ -3292,6 +3381,7 @@ const adapter = new (class QQBotAdapter {
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
     await this.errorStore.init()
+    await this.contentGuard.init()
     this.webuiEnabled = config.webui?.enabled !== false
     this.webuiDataEnabled = false
     if (this.webuiEnabled && (await isWebUIInitialized())) await this.enableWebUIData()

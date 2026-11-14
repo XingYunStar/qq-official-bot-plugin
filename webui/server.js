@@ -16,8 +16,9 @@ import YAML from "yaml"
 import axios from "axios"
 import { startQrLogin, pollQrLogin, selectDeveloper } from "../components/qqlogin.js"
 import { fetchStats } from "../model/stats.js"
-import { fetchBotQQ } from "../components/token.js"
+import { fetchBotQQ, parseTokenLine, parseCompactTokenLine } from "../components/token.js"
 import { dayKey } from "../components/group-stats.js"
+import { runSandbox, startSandbox, removeSandboxBot } from "../components/sandbox.js"
 
 const DATA_DIR = path.join("data", "QQBot")
 const AUTH_FILE = path.join(DATA_DIR, "webui.json")
@@ -292,6 +293,58 @@ async function configFiles() {
     } catch {}
   }
   return [...files]
+}
+
+const DATA_ROOT = path.resolve("data", "QQBot")
+const DATA_PREVIEW_BYTES = 2 * 1024 * 1024
+const DATA_PROTECTED = new Set(["webui.json"])
+
+function dataSafePath(rel = "") {
+  const target = path.resolve(DATA_ROOT, String(rel || ""))
+  if (target !== DATA_ROOT && !target.startsWith(DATA_ROOT + path.sep)) throw new Error("非法路径")
+  return target
+}
+function dataRelPath(abs) {
+  const rel = path.relative(DATA_ROOT, abs)
+  return rel ? rel.split(path.sep).join("/") : ""
+}
+function dataProtected(rel) {
+  return String(rel || "").split("/").some(part => DATA_PROTECTED.has(part))
+}
+let dataUsageCache = { at: 0, size: 0, files: 0, dirs: 0 }
+async function dataUsage() {
+  if (Date.now() - dataUsageCache.at < 5000) return dataUsageCache
+  let size = 0
+  let files = 0
+  let dirs = 0
+  const stack = [DATA_ROOT]
+  while (stack.length) {
+    const dir = stack.pop()
+    let rows
+    try { rows = await fs.readdir(dir, { withFileTypes: true }) } catch { continue }
+    for (const row of rows) {
+      const full = path.join(dir, row.name)
+      if (row.isSymbolicLink()) continue
+      if (row.isDirectory()) {
+        dirs++
+        stack.push(full)
+      } else if (row.isFile()) {
+        files++
+        try { size += (await fs.stat(full)).size } catch {}
+      }
+    }
+  }
+  dataUsageCache = { at: Date.now(), size, files, dirs }
+  return dataUsageCache
+}
+function invalidateDataUsage() { dataUsageCache = { at: 0, size: 0, files: 0, dirs: 0 } }
+
+async function dataStat(rel) {
+  const abs = dataSafePath(rel)
+  if (dataProtected(dataRelPath(abs))) throw new Error("该文件受保护")
+  const stat = await fs.lstat(abs)
+  if (stat.isSymbolicLink()) throw new Error("不支持符号链接")
+  return { abs, stat, rel: dataRelPath(abs) }
 }
 
 const qqGroupCache = new Map()
@@ -614,6 +667,12 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
   const settings = config.webui || {}
   if (settings.enabled === false) return null
   installLiveLog(logger)
+  // YePanel 的实时日志在断开时会 resetLog()，会替换 global.logger 并清掉我们的 hook。
+  // 定期把 hook 重新挂到当前 logger 上，保证 WebUI 实时日志不会在 YePanel 使用后变空。
+  const liveHookTimer = setInterval(() => {
+    try { installLiveLog(globalThis.logger || logger) } catch {}
+  }, 2000)
+  liveHookTimer.unref?.()
   const port = Number(settings.port) || 2580
   const host = settings.host || "0.0.0.0"
 
@@ -634,6 +693,60 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
     }
     return [...ids]
   }
+  /**
+   * 保存配置后直接应用机器人账号：新增/替换的账号立即连接，删除的账号立即断开。
+   * 只处理 token 账号；WebUI 端口、签名证书等进程级设置仍需重启。
+   */
+  const applyBotTokens = async () => {
+    const tokens = Array.isArray(config.token) ? config.token.filter(Boolean) : []
+    const wanted = []
+    const errors = []
+    for (const line of tokens) {
+      const text = String(line)
+      let info = parseTokenLine(text)
+      if (!info) {
+        const compact = parseCompactTokenLine(text)
+        if (compact) {
+          try {
+            const bot = await fetchBotQQ(compact)
+            info = { id: bot.id, ...compact }
+          } catch (err) {
+            errors.push(String(err.message || err))
+            continue
+          }
+        }
+      }
+      if (info?.id) wanted.push({ line: text, id: info.id })
+      else errors.push(`账号格式错误：${text.split(":")[0] || "空"}`)
+    }
+    const wantedIds = new Set(wanted.map(i => i.id))
+    const removed = []
+    for (const id of [...Bot.uin]) {
+      const bot = Bot[id]
+      if (!bot || bot.adapter !== adapter) continue
+      if (wantedIds.has(id)) continue
+      removed.push(id)
+      adapter.stopRetry?.(id)
+      adapter.stopWatcher?.(id)
+      try { adapter.token?.[id]?.dispose?.() } catch {}
+      try { await bot.logout?.() } catch {}
+      delete Bot[id]
+      const index = Bot.uin.indexOf(id)
+      if (index >= 0) Bot.uin.splice(index, 1)
+    }
+    const connected = []
+    const failed = []
+    for (const item of wanted) {
+      try {
+        if (await adapter.connect(item.line)) connected.push(item.id)
+        else failed.push(item.id)
+      } catch (err) {
+        failed.push(`${item.id}：${err.message || err}`)
+      }
+    }
+    return { connected, removed, failed, errors }
+  }
+
   let collectTimer = null
   let collecting = false
   const collectStats = async () => {
@@ -755,18 +868,229 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
       if (!authData.initialized)
         return json(res, 403, { error: "请先设置 WebUI 密码", code: "PASSWORD_SETUP_REQUIRED" })
 
+      // ---- sandbox ----
+      if (pathname === "/api/sandbox/stream" && req.method === "POST") {
+        let body
+        try {
+          body = JSON.parse((await readBody(req)) || "{}")
+        } catch {
+          return json(res, 400, { error: "请求格式错误" })
+        }
+        const command = String(body.command || "").slice(0, 4000)
+        if (!command.trim()) return json(res, 400, { error: "请输入指令" })
+
+        res.writeHead(200, {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
+          Connection: "keep-alive",
+        })
+        let closed = false
+        let bot = null
+        let timer = null
+        const send = obj => {
+          if (closed) return
+          try { res.write(JSON.stringify(obj) + "\n") } catch { finish() }
+        }
+        const cleanup = () => {
+          if (timer) { clearInterval(timer); timer = null }
+          if (bot) { const b = bot; bot = null; setTimeout(() => removeSandboxBot(Bot, b), 10000).unref?.() }
+        }
+        const finish = (error = "") => {
+          if (closed) return
+          send({ type: "done", error })
+          closed = true
+          if (timer) { clearInterval(timer); timer = null }
+          try { res.end() } catch {}
+          cleanup()
+        }
+        res.on("close", () => {
+          closed = true
+          if (timer) { clearInterval(timer); timer = null }
+          cleanup()
+        })
+        send({ type: "start", time: Date.now() })
+        try {
+          const started = startSandbox(Bot, {
+            command,
+            scene: body.scene === "private" ? "private" : "group",
+            groupId: String(body.groupId || "sandbox.group").slice(0, 80),
+            userId: String(body.userId || "sandbox.user").slice(0, 80),
+            isMaster: body.master !== false,
+          })
+          bot = started.bot
+          if (started.error) return finish(started.error)
+          const startedAt = Date.now()
+          let sent = 0
+          let lastChange = Date.now()
+          timer = setInterval(() => {
+            if (closed || !bot) return
+            let added = false
+            while (sent < bot.captured.length) {
+              send({ type: "message", message: bot.captured[sent++] })
+              added = true
+            }
+            if (added) lastChange = Date.now()
+            const idle = sent > 0 && Date.now() - lastChange >= 1200
+            const noReply = sent === 0 && Date.now() - startedAt >= 15000
+            const timeout = Date.now() - startedAt >= 30000
+            if (idle || noReply || timeout) finish()
+          }, 100)
+        } catch (err) {
+          finish(String(err.message || err))
+        }
+        return
+      }
+
+      if (pathname === "/api/sandbox/run" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}")
+          const command = String(body.command || "").slice(0, 4000)
+          if (!command.trim()) return json(res, 400, { error: "请输入指令" })
+          const result = await runSandbox(Bot, {
+            command,
+            scene: body.scene === "private" ? "private" : "group",
+            groupId: String(body.groupId || "sandbox.group").slice(0, 80),
+            userId: String(body.userId || "sandbox.user").slice(0, 80),
+            isMaster: body.master !== false,
+            wait: Number(body.wait) || 8000,
+          })
+          return json(res, 200, { ok: true, ...result })
+        } catch (err) {
+          return json(res, 500, { error: String(err.message || err) })
+        }
+      }
+
+      // ---- data/QQBot file manager ----
+      if (pathname === "/api/data/list" && req.method === "GET") {
+        try {
+          const rel = url.searchParams.get("path") || ""
+          const { abs, stat, rel: safeRel } = await dataStat(rel)
+          if (!stat.isDirectory()) return json(res, 400, { error: "不是目录" })
+          const entries = []
+          for (const name of await fs.readdir(abs)) {
+            if (DATA_PROTECTED.has(name)) continue
+            const child = path.join(abs, name)
+            const childRel = safeRel ? `${safeRel}/${name}` : name
+            let st
+            try { st = await fs.lstat(child) } catch { continue }
+            if (st.isSymbolicLink()) continue
+            entries.push({
+              name,
+              path: childRel,
+              type: st.isDirectory() ? "dir" : "file",
+              size: st.isFile() ? st.size : 0,
+              mtime: st.mtimeMs || 0,
+              editable: st.isFile() && st.size <= DATA_PREVIEW_BYTES,
+            })
+          }
+          entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, "zh-CN") : a.type === "dir" ? -1 : 1))
+          const usage = await dataUsage()
+          return json(res, 200, {
+            root: "data/QQBot",
+            path: safeRel,
+            totalSize: usage.size,
+            totalFiles: usage.files,
+            totalDirs: usage.dirs,
+            parent: safeRel.includes("/") ? safeRel.slice(0, safeRel.lastIndexOf("/")) : "",
+            entries,
+          })
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/data/read" && req.method === "GET") {
+        try {
+          const { abs, stat, rel } = await dataStat(url.searchParams.get("path") || "")
+          if (!stat.isFile()) return json(res, 400, { error: "不是文件" })
+          if (stat.size > 64 * 1024 * 1024) return json(res, 413, { error: "文件超过 64MB，请直接下载" })
+          const handle = await fs.open(abs, "r")
+          let content = ""
+          let truncated = false
+          try {
+            const length = Math.min(stat.size, DATA_PREVIEW_BYTES)
+            const buffer = Buffer.alloc(length)
+            const { bytesRead } = await handle.read(buffer, 0, length, 0)
+            content = buffer.subarray(0, bytesRead).toString("utf8")
+            truncated = bytesRead < stat.size
+          } finally { await handle.close() }
+          if (content.includes("\u0000")) return json(res, 415, { error: "二进制文件，请下载查看" })
+          if (!truncated && /\.json$/i.test(rel)) {
+            try { content = JSON.stringify(JSON.parse(content), null, 2) } catch {}
+          }
+          return json(res, 200, { path: rel, size: stat.size, mtime: stat.mtimeMs || 0, content, truncated, editable: stat.size <= DATA_PREVIEW_BYTES })
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/data/download" && req.method === "GET") {
+        try {
+          const { abs, stat } = await dataStat(url.searchParams.get("path") || "")
+          if (!stat.isFile()) return json(res, 400, { error: "不是文件" })
+          res.writeHead(200, {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": stat.size,
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(path.basename(abs))}"`,
+          })
+          createReadStream(abs).pipe(res)
+          return
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/data/write" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}")
+          const rel = String(body.path || "")
+          const target = dataSafePath(rel)
+          if (dataProtected(rel)) return json(res, 403, { error: "该文件受保护" })
+          const content = String(body.content ?? "")
+          if (content.length > 5 * 1024 * 1024) return json(res, 413, { error: "内容超过 5MB" })
+          if (/\.json$/i.test(rel)) JSON.parse(content)
+          await fs.mkdir(path.dirname(target), { recursive: true })
+          const tmp = `${target}.tmp`
+          await fs.writeFile(tmp, content, "utf8")
+          await fs.rename(tmp, target)
+          invalidateDataUsage()
+          return json(res, 200, { ok: true, path: rel, size: Buffer.byteLength(content) })
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/data/mkdir" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}")
+          const rel = String(body.path || "").replace(/\/+$/, "")
+          if (!rel) return json(res, 400, { error: "缺少目录名" })
+          const target = dataSafePath(rel)
+          if (dataProtected(rel)) return json(res, 403, { error: "该路径受保护" })
+          await fs.mkdir(target, { recursive: false })
+          invalidateDataUsage()
+          return json(res, 200, { ok: true, path: rel })
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+      if (pathname === "/api/data/delete" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}")
+          const rel = String(body.path || "")
+          if (!rel) return json(res, 400, { error: "不能删除根目录" })
+          if (dataProtected(rel)) return json(res, 403, { error: "该路径受保护" })
+          const target = dataSafePath(rel)
+          const st = await fs.lstat(target)
+          if (st.isSymbolicLink()) return json(res, 400, { error: "不支持符号链接" })
+          await fs.rm(target, { recursive: st.isDirectory() })
+          invalidateDataUsage()
+          return json(res, 200, { ok: true })
+        } catch (err) { return json(res, 400, { error: String(err.message || err) }) }
+      }
+
       // ---- status ----
       if (pathname === "/api/status") {
         const bots = []
         for (const [id, bot] of Object.entries(Bot)) {
           if (!bot || typeof bot !== "object" || !bot.sdk || bot.adapter !== adapter) continue
+          const webhook = !!adapter.appid[bot.info?.appid]
+          // sdk 对象在 access_token 失败前就已经创建，不能再拿 !!bot.sdk 当在线状态
+          const online = !!bot.sdk && (webhook || !!bot.sdk.receiver?.isReady)
           bots.push({
             id,
             appid: bot.info?.appid || "",
             name: bot.info?.username || bot.info?.nickname || bot.nickname || id,
             avatar: bot.info?.avatar || "",
-            online: !!bot.sdk,
-            webhook: !!adapter.appid[bot.info?.appid],
+            online,
+            webhook,
           })
         }
         return json(res, 200, {
@@ -849,7 +1173,17 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           const parsed = doc.toJS()
           if (!parsed || typeof parsed !== "object") throw new Error("配置内容必须是对象")
           await fs.writeFile(file, doc.toString(), "utf8")
-          return json(res, 200, { ok: true, note: "已保存；端口/机器人类配置需要重启 TRSS 后生效" })
+          for (const key of Object.keys(config)) delete config[key]
+          Object.assign(config, parsed)
+          if (body.apply) {
+            const applied = await applyBotTokens()
+            return json(res, 200, {
+              ok: true,
+              note: `已保存并应用账号：${applied.connected.length} 个已连接${applied.failed.length ? `，${applied.failed.length} 个失败` : ""}${applied.removed.length ? `，${applied.removed.length} 个已移除` : ""}；端口/证书等进程级设置仍需重启`,
+              applied,
+            })
+          }
+          return json(res, 200, { ok: true, note: "已保存；可使用「保存并上线」立即重连机器人，端口/证书等进程级设置仍需重启" })
         } catch (err) {
           return json(res, 400, { error: `保存失败：${err.message || err}` })
         }
@@ -882,8 +1216,16 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           try {
             await configSave()
           } catch {}
+          if (body.apply) {
+            const applied = await applyBotTokens()
+            return json(res, 200, {
+              ok: true,
+              note: `已保存并应用账号：${applied.connected.length} 个已连接${applied.failed.length ? `，${applied.failed.length} 个失败` : ""}${applied.removed.length ? `，${applied.removed.length} 个已移除` : ""}`,
+              applied,
+            })
+          }
         }
-        return json(res, 200, { ok: true, note: "部分设置需要重启 TRSS 生效" })
+        return json(res, 200, { ok: true, note: "已保存；可使用「保存并上线」立即重连机器人，端口/证书等进程级设置仍需重启" })
       }
 
       // ---- error log ----

@@ -8,7 +8,7 @@
 <script>
 try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset.theme=t||'dark'}catch(e){}
 </script>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=20261114.1">
 <link rel="stylesheet" href="/vendor/katex.min.css">
 </head>
 <body>
@@ -64,6 +64,8 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
       <button data-tab="config"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>配置</button>
       <button data-tab="logs"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span>日志</button>
       <button data-tab="errors"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 3.8L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>报错</button>
+      <button data-tab="data"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span>数据</button>
+      <button data-tab="sandbox"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3v4M15 3v4M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4M8 21h8"/></svg></span>沙箱</button>
       <button data-tab="system"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>系统状态</button>
       <button data-tab="materials"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>素材</button>
       <button data-tab="groups"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>群管理</button>
@@ -91,7 +93,6 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
   <section id="tab-stats">
     <div class="row between">
       <div class="row">
-        <button class="ghost" data-range="today">今天</button>
         <button class="ghost" data-range="yesterday">昨天</button>
         <button class="ghost" data-range="7d">近 7 天</button>
         <button class="ghost" data-range="14d">近 14 天</button>
@@ -151,9 +152,10 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
         </div>
         <button class="ghost" id="cfgReload">重新读取</button>
         <button id="cfgSave">保存配置</button>
+        <button class="ghost" id="cfgApply">保存并上线</button>
         <span class="muted" id="cfgDirty"></span>
       </div>
-      <p class="muted" id="cfgHint">QQBot.yaml 推荐使用可视化配置；其他 YAML 文件使用原始 YAML 编辑。保存后部分设置需要重启 TRSS 生效。</p>
+      <p class="muted" id="cfgHint">QQBot.yaml 推荐使用可视化配置；「保存并上线」会立即连接新增/修改的机器人账号并断开已删除账号；端口、证书等进程级设置仍需重启。</p>
     </div>
     <div id="cfgForm" class="config-form hide"></div>
     <textarea id="cfgText" spellcheck="false" style="margin-top:12px"></textarea>
@@ -178,7 +180,7 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
       <div class="log-group">
         <div class="log-group-title">历史日志</div>
         <label>文件 <select id="logFile"></select></label>
-        <label>初始加载 <input id="logTail" type="number" value="2000" min="100" max="3000" style="width:92px"> 行</label>
+        <label>初始加载 <input id="logTail" type="number" value="2000" min="100" max="10000" style="width:92px"> 行</label>
         <button id="logLoad">加载日志</button>
       </div>
       <div class="log-group">
@@ -191,7 +193,7 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
         <button class="ghost" id="logDownload">下载当前内容</button>
       </div>
     </div>
-    <div class="log-status"><span id="logStatus">尚未加载日志</span><span class="muted">滚动到顶部/底部自动加载；窗口最多保留 3000 行</span></div>
+    <div class="log-status"><span id="logStatus">尚未加载日志</span><span class="muted">滚动到顶部/底部自动加载；目标保留 10000 行，超过 12000 行时批量卸载</span></div>
     <div class="log-search-panel hide" id="logSearchPanel">
       <div class="log-search-head">
         <strong id="logSearchTitle">全文件搜索结果</strong>
@@ -226,6 +228,74 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
     </div>
     <div id="errList" class="error-list"></div>
     <div class="row" style="justify-content:center;margin:14px 0"><button class="ghost hide" id="errMore">加载更早的报错</button></div>
+  </section>
+
+  <section id="tab-sandbox" class="hide">
+    <div class="row between">
+      <h2 style="margin:0">指令沙箱</h2>
+      <div class="row"><span class="muted" id="sbxStatus">就绪</span><button class="ghost" id="sbxClear">清空对话</button></div>
+    </div>
+    <p class="muted">直接输入任意机器人指令，模拟 QQBot 群/好友事件。只在内存中执行，不会发送到真实 QQ。</p>
+    <div class="sandbox-chat">
+      <div class="sandbox-chat-head">
+        <label>场景 <select id="sbxScene"><option value="group">群聊</option><option value="private">私聊</option></select></label>
+        <label class="log-inline-check"><input id="sbxMaster" type="checkbox" checked> master 权限</label>
+        <input id="sbxGroup" value="sandbox.group" placeholder="模拟群 ID">
+        <input id="sbxUser" value="sandbox.user" placeholder="模拟用户 ID">
+      </div>
+      <div class="sandbox-messages" id="sbxMessages">
+        <div class="sandbox-empty">输入指令开始聊天。历史只保留在当前页面，刷新后清空。</div>
+      </div>
+      <div class="sandbox-composer">
+        <div class="sandbox-examples">
+          <button data-sbx-example="#qqbot测试">#qqbot测试</button>
+          <button data-sbx-example="#qqbot图文1">#qqbot图文1</button>
+          <button data-sbx-example="#qqbot图文2">#qqbot图文2</button>
+          <button data-sbx-example="#qqbot图文3">#qqbot图文3</button>
+          <button data-sbx-example="#qqbot卡片1">#qqbot卡片1</button>
+          <button data-sbx-example="#qqbot卡片2">#qqbot卡片2</button>
+          <button data-sbx-example="#qqbot卡片3">#qqbot卡片3</button>
+          <button data-sbx-example="#qqbot公式">#qqbot公式</button>
+          <button data-sbx-example="#qqbot媒体">#qqbot媒体</button>
+        </div>
+        <div class="sandbox-send-row">
+          <textarea id="sbxCommand" rows="2" placeholder="输入任意指令，Enter 发送，Shift+Enter 换行"></textarea>
+          <button id="sbxRun">发送</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-data" class="hide">
+    <div class="row between">
+      <h2 style="margin:0">数据文件</h2>
+      <div class="row"><span class="muted" id="dataPath">data/QQBot</span><span class="muted" id="dataTotal">计算中…</span><button class="ghost" id="dataRefresh">刷新</button></div>
+    </div>
+    <p class="muted">管理 data/QQBot 下的文本文件。webui.json 等认证文件不会显示或允许读取。</p>
+    <div class="data-layout">
+      <aside class="data-side">
+        <div class="data-toolbar">
+          <button class="ghost" id="dataParent">上级</button>
+          <button class="ghost" id="dataMkdir">新建目录</button>
+          <button class="ghost" id="dataUpload">上传文件</button>
+          <input id="dataFileInput" type="file" hidden>
+        </div>
+        <div class="data-list" id="dataList"><div class="muted" style="padding:12px">加载中…</div></div>
+      </aside>
+      <article class="data-main">
+        <div class="row between data-head">
+          <div><strong id="dataName">选择一个文件</strong><div class="muted" id="dataMeta"></div></div>
+          <div class="row">
+            <button class="ghost" id="dataDownload" disabled>下载</button>
+            <button class="ghost" id="dataEdit" disabled>编辑</button>
+            <button class="ghost" id="dataDelete" disabled>删除</button>
+          </div>
+        </div>
+        <pre class="data-view" id="dataView">左侧选择文件查看内容</pre>
+        <textarea class="data-editor hide" id="dataEditor" spellcheck="false"></textarea>
+        <div class="row hide" id="dataEditActions"><button id="dataSave">保存文件</button><button class="ghost" id="dataCancel">取消</button><span class="muted" id="dataMsg"></span></div>
+      </article>
+    </div>
   </section>
 
   <section id="tab-system" class="hide">
@@ -363,11 +433,11 @@ try{const t=localStorage.getItem('qqbot_theme');document.documentElement.dataset
   </div>
 </div>
 <div class="ctx-menu hide" id="ctxMenu"></div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><span id="toastMsg"></span><button type="button" class="toast-close" id="toastClose" aria-label="关闭">×</button></div>
 <script src="/vendor/marked.umd.js"></script>
 <script src="/vendor/katex.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
-<script src="/app.js"></script>
+<script src="/app.js?v=20261114.1"></script>
 </body>
 </html>
 

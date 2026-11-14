@@ -11,21 +11,8 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.12-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm&logoColor=white)](https://pnpm.io/)
 
-[![Stars](https://img.shields.io/github/stars/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=github&color=f59e0b)](https://github.com/XingYunStar/qq-official-bot-plugin/stargazers)
-[![Forks](https://img.shields.io/github/forks/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=git&color=ec4899)](https://github.com/XingYunStar/qq-official-bot-plugin/forks)
-[![Issues](https://img.shields.io/github/issues/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=github&color=ef4444)](https://github.com/XingYunStar/qq-official-bot-plugin/issues)
-[![Pull Requests](https://img.shields.io/github/issues-pr/XingYunStar/qq-official-bot-plugin?style=for-the-badge&logo=gitlab&color=a855f7)](https://github.com/XingYunStar/qq-official-bot-plugin/pulls)
-
-[![Last Commit](https://img.shields.io/github/last-commit/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=git&color=8b5cf6)](https://github.com/XingYunStar/qq-official-bot-plugin/commits)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/XingYunStar/qq-official-bot-plugin?style=flat-square&logo=github&color=06b6d4)](https://github.com/XingYunStar/qq-official-bot-plugin/graphs/commit-activity)
-[![Repo Size](https://img.shields.io/github/repo-size/XingYunStar/qq-official-bot-plugin?style=flat-square&color=64748b)](https://github.com/XingYunStar/qq-official-bot-plugin)
-[![Code Size](https://img.shields.io/github/languages/code-size/XingYunStar/qq-official-bot-plugin?style=flat-square&color=14b8a6)](https://github.com/XingYunStar/qq-official-bot-plugin)
-[![Top Language](https://img.shields.io/github/languages/top/XingYunStar/qq-official-bot-plugin?style=flat-square&color=f97316)](https://github.com/XingYunStar/qq-official-bot-plugin)
-[![Tests](https://img.shields.io/badge/tests-173%20passed-22c55e?style=flat-square&logo=checkmarx&logoColor=white)](#测试)
-[![WebUI](https://img.shields.io/badge/WebUI-online-22c55e?style=flat-square&logo=googlechrome&logoColor=white)](http://<服务器IP>:2540/)
-
 [![QQ 群](https://img.shields.io/badge/QQ%20群-1046894467-12b7f5?style=for-the-badge&logo=tencentqq&logoColor=white)](https://qm.qq.com/q/WdZoPbyPsI)
-[![机器人](https://img.shields.io/badge/机器人-流萤-ff69b4?style=for-the-badge&logo=qq&logoColor=white)](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
+[![机器人](https://img.shields.io/badge/机器人-流萤-ff69b4?style=for-the-badge&logo=qq&logoColor=white)](https://q.qq.com/qqbot/dashboard)
 [![更新日志](https://img.shields.io/badge/更新日志-CHANGELOG-8b5cf6?style=for-the-badge&logo=readthedocs&logoColor=white)](CHANGELOG.md)
 
 <br>
@@ -34,24 +21,21 @@
 
 </div>
 
-<p align="center">
-  <a href="https://github.com/XingYunStar/qq-official-bot-plugin/stargazers">
-    <img src="https://api.star-history.com/svg?repos=XingYunStar/qq-official-bot-plugin&type=Date" alt="Star History" width="78%">
-  </a>
-</p>
-
 ---
 
 ## 📚 目录
 
 - [界面预览](#界面预览)
 - [简介](#简介)
+- [个人开发者机器人](#个人开发者机器人现在能做什么)
 - [架构与消息流](#-架构与消息流)
 - [最近更新](#-最近更新)
 - [快速开始](#快速开始)
 - [新版支持了什么](#新版支持了什么)
 - [配置](#配置)
 - [WebUI](#webui)
+- [数据文件](#-数据文件)
+- [指令沙箱](#-指令沙箱)
 - [测试插件](#测试插件exampleqqbot-testjs)
 - [与旧版的差异](#与旧版的差异)
 - [已知限制](#已知限制)
@@ -70,7 +54,7 @@
 </p>
 
 <p align="center">
-  群聊实时消息、成员身份、引用/图片/文件卡片 · 可视化配置机器人账号（截图数据已脱敏）
+  群聊实时消息 · 可视化配置 · 截图数据已脱敏
 </p>
 
 ---
@@ -84,6 +68,16 @@
 - 赠送一个功能测试插件（[example/qqbot-test.js](example/qqbot-test.js)），首次启动时自动安装到 `plugins/example/`，方便验证各项能力
 
 ---
+
+## 个人开发者机器人现在能做什么
+
+QQ 开放平台个人开发者的机器人现在可以自由加入自己为群主 / 管理员的群聊：
+
+- **不用 @ 也能回应**：在群设置中给机器人开启「全量消息」
+- **主动发送消息**：在群设置中允许机器人主动消息
+- **群管理**：撤回、禁言、监听进 / 退群、处理进群申请
+
+> 具体能力取决于 QQ 开放平台权限和群设置。
 
 ## 🧭 架构与消息流
 
@@ -132,11 +126,11 @@ sequenceDiagram
 
 | 日期 | 更新 |
 | --- | --- |
-| 2026-11-11 | `GROUP_MEMBER` 入群申请恢复；测试插件事件只记日志 |
-| 2026-11-11 | 报错归档：错误码筛选、30 天保留、完整发送内容、默认屏蔽 `40034005 / 40034105 / 40034128` |
-| 2026-11-11 | 日志页：连续滚动窗口、全文件搜索、随时停止、ANSI 配色 |
-| 2026-11-11 | 运营数据：相对日期按当前日期计算，登录过期明确提示 |
-| 2026-11-11 | 群聊：右键退出群聊；日志消息 INFO 落盘 |
+| 2026-11-14 | 沙箱改为聊天式布局：流式追加回复、当前历史、任意指令，不再需要「允许任意指令」开关 |
+| 2026-11-14 | 配置中心新增图片发送方式、消息发送方式、保存并上线；配置保存后弹窗可手动关闭 |
+| 2026-11-14 | 测试插件新增官方 `msg_type=8` 卡片、彩色 KaTeX 公式、语音/视频/文件组件 |
+| 2026-11-14 | README 截图改为按功能内嵌；移除徽章和 Star History |
+| 2026-11-13 | 报错归档、日志搜索、数据管理和群聊右键菜单完善 |
 
 ---
 
@@ -175,10 +169,11 @@ pnpm install
 
 ### 3. 创建机器人
 
-打开 [QQ 开放平台](https://q.qq.com) 创建 Bot：
+打开 [QQ 开放平台](https://q.qq.com/qqbot/dashboard) 创建 Bot：
 
 1. 创建机器人
 2. 开发设置 → 得到 `AppID` 和 `AppSecret`（机器人 QQ 号可由接口自动获取）
+3. 配置服务器 IP 白名单：填写服务器公网 IP；如果使用手机或本地电脑部署，填写对应手机或电脑的 IP
 
 ### 4. 配置账号
 
@@ -199,8 +194,8 @@ pnpm install
    - AppSecret（32 位字母/数字）
    - 连接方式（WebSocket / WebHook）
    - 群聊、频道私域开关
-5. 点击「保存配置」，WebUI 会自动调用接口获取机器人 QQ 号并写入 YAML
-6. 重启 TRSS，让新增机器人连接生效
+5. 点击「保存并上线」，WebUI 会自动调用接口获取机器人 QQ 号、写入 YAML 并立即连接
+6. 无需重启；只有 WebUI 端口、证书等进程级配置仍需要重启 TRSS
 
 表单里只需要填 AppID + AppSecret，机器人 QQ 号会自动获取并显示；不直接显示最终 token 拼接字符串。AppSecret 支持「显示/隐藏」切换。保存后可以在「原始 YAML」里看到拼装出的 `token:` 行，方便核对或迁移。AppSecret 属于敏感信息，不要截图或分享配置。
 
@@ -219,7 +214,7 @@ pnpm install
 #QQBot设置102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432
 ```
 
-- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
+- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com/qqbot/dashboard)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
 
 ```
 #QQBot设置102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
@@ -273,6 +268,10 @@ pnpm install
 ```
 
 > legacy（普通消息）模式下，频道/频道私信的本地图片会走 **multipart 上传**，不需要公网地址；群聊/单聊图片本来就走上行接口，也不需要。
+
+<p align="center">
+  <img src="docs/screenshots/markdown_legacy.png" alt="legacy 普通消息效果" width="58%">
+</p>
 </details>
 
 
@@ -288,6 +287,11 @@ pnpm install
 ```
 
 > raw / inline（MD 按钮消息 / MD 消息）模式下的图片会优先通过**官方素材管理**上传，Markdown 里直接使用 `qqbot-media://` 引用，**不再需要公网地址**；如果素材接口不可用（如没有权限），才会回退到公网 URL，这时才需要下面的配置：
+
+<p align="center">
+  <img src="docs/screenshots/markdown_raw.png" alt="raw Markdown 按钮消息效果" width="58%">
+</p>
+
 
 1. 在 `TRSS-Yunzai/config/config/server.yaml` 的 `url` 填入公网地址 **域名或 IP**（需放行 2536 端口，或反向代理到 TRSS 的内网地址），浏览器打开该地址，后台日志应出现访问请求。
 2. 使用域名时，需要在宿主机把域名反向代理到 TRSS 的内网地址 `http://<TRSS内网IP>:2536`；docker 容器 TRSS 的内网 IP 可用下面命令查看（把 `TRSS` 换成你的容器名）：
@@ -342,7 +346,7 @@ https:
 | **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；被动回复的 `msg_id` 由消息池决定 |
 | **被动回复池** | 官方限制同一条群消息最多回复 5 条：插件会记录收到的群消息 ID（有效期 110 秒），发送时优先用最旧、未满 5 次的那个，避免一条消息被回复满后无法继续回复；没有有效消息时走主动消息 |
 | **MD 图片素材** | 通过官方素材管理上传图片（使用**发消息的那个机器人**上传，`qqbot-media://` 与机器人绑定），Markdown 中直接引用 `qqbot-media://`，不需要公网 URL；上传后 **1 分钟自动删除未复用的图**（复用次数=0）；按 Buffer MD5 复用（记录持久化），复用次数最高的 **20 张**不会被 1 分钟清理；每天清理复用次数=0 的记录、每周只保留复用次数最高的 20 张；素材达到 **100 张**或平台返回数量上限错误时立即清空全部素材并重试；上传失败自动回退到 `server.yaml` 的 `url` |
-| **群管理** | `e.group.muteMember()` 禁言、`e.group.kickMember()` 踢人、`e.group.getInfo()` 群信息、`e.group.getMemberInfo()` 成员信息；`e.member.is_admin / is_owner` |
+| **群管理** | `e.group.muteMember()` 禁言、`e.group.kickMember()` 踢人、`e.group.getInfo()` 群信息、`e.group.getMemberInfo()` 成员信息；`e.member.is_admin / is_owner`；WebUI 群聊支持右键 @、引用、禁言、踢人、退出群聊 |
 | **群通知** | 成员进群/退群 → `notice.group.increase/decrease`；入群申请 → `notice.group.join_request`（依赖 `GROUP_MEMBER` intent + 管理员权限）；机器人被拉群 → `notice.group.bot.increase` |
 | **成员身份 / 昵称** | 优先使用消息事件 `author` / `mentions` 自带的 `member_role`、`username`，不依赖需要申请权限的「群成员详情」接口（接口报 `11253` 时自动回退） |
 | **入群审批** | 通过 `qq-official-bot` 的入群申请接口查询、同意、拒绝 |
@@ -352,7 +356,11 @@ https:
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
 | **日志中心** | 历史日志 + 实时日志；连续滚动窗口；全文件搜索可随时停止；命中结果跳转定位；ANSI 彩色日志；大文件按行索引分页，不把整份日志塞给浏览器 |
 | **报错归档** | 按错误码查看最近 30 天报错；保存发送内容、调用参数、请求、响应、堆栈；默认屏蔽 `40034005` / `40034105` / `40034128`；WebUI 可直接查看完整上下文 |
-| **WebUI** | 内置管理面板：配置、日志、报错、素材、群成员、群聊、运营数据；群聊支持右键退出；配置只填 AppID+AppSecret 自动获取机器人 QQ；密码在日志和 `data/QQBot/webui.json` |
+| **数据管理** | WebUI 新增「数据」页：浏览 `data/QQBot`、查看 JSON/NDJSON、编辑保存、上传、下载、删除、新建目录；自动隐藏 `webui.json` 等认证文件，禁止路径穿越 |
+| **指令沙箱** | WebUI 新增「沙箱」页：模拟群聊/私聊事件执行机器人指令，不连接 QQ；像聊天一样显示当前历史，流式追加回复；渲染 Markdown、KaTeX 公式、图片、语音/视频/文件、键盘按钮、`msg_type=8` 图文卡片；捕获原始回复 JSON |
+| **运营数据** | WebUI 运营数据页：昨天 / 近 7 / 14 / 30 天 / 本月 / 总览 / 自定义范围；QQ 不提供当天数据，因此不显示「今天」 |
+| **Markdown / 图文卡片** | 支持 Markdown、表格、KaTeX 颜色公式、图片、内嵌键盘按钮和 `msg_type=8` 图文卡片；卡片可同时携带 keyboard |
+| **WebUI** | 内置管理面板：配置、日志、报错、数据、素材、群成员、群聊、运营数据；群聊支持右键退出；配置只填 AppID+AppSecret 自动获取机器人 QQ；密码在日志和 `data/QQBot/webui.json` |
 | **测试插件自动安装** | 首次启动把 `example/qqbot-test.js` 复制到 `plugins/example/`，并向 master 发送使用说明（单聊） |
 
 ## 配置
@@ -385,7 +393,7 @@ webui:
   host: 0.0.0.0
 
 markdown:
-  "114514": raw         # raw / inline / legacy / 模板ID
+  "114514": raw         # raw=Markdown按钮消息 / inline=Markdown消息 / legacy=普通消息 / 模板ID
 ```
 
 | 配置项 | 说明 |
@@ -394,10 +402,10 @@ markdown:
 | 自动获取QQ | 只填 AppID+AppSecret 时，启动/保存/添加账号会请求开放平台获取机器人 QQ；接口失败会记录错误，此时可改用显式 QQ 格式 |
 | `bot` | 传给 SDK 的公共配置；`sandbox` 已废弃，`maxRetry` / `timeout` 仍生效 |
 | `toQRCode` | URL 处理方式：`true` 二维码、`"link"` Markdown 链接、`false` 原样 |
-| `markdown` | `机器人QQ号: raw / inline / legacy / 模板ID` |
+| `markdown` | 消息发送方式：`raw`（Markdown 按钮消息）/ `inline`（Markdown 消息）/ `legacy`（普通消息，不用 Markdown）/ 模板 ID |
 | `groupMemberEvent` | 是否订阅 `GROUP_MEMBER`（1<<24）以接收成员增减、入群申请，默认 `true`；平台返回 4014 时运行期自动降级 |
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
-| `toBotUpload` | 是否把 Markdown 图片上传到官方素材（`qqbot-media://`），默认 `true` |
+| `toBotUpload` | 图片发送方式：`true` 优先上传官方素材（`qqbot-media://`，失败回退公网 URL）；`false` 直接使用公网 URL。WebUI 配置中心为「图片发送方式」下拉框，保存后立即生效 |
 | `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
 | `webui` | WebUI 配置：`enabled` / `port`（默认 2580）/ `host`（默认 0.0.0.0） |
 | `reconnect` | 重连/心跳参数，同旧版 |
@@ -422,24 +430,59 @@ markdown:
 
 插件启动时会在 `2580` 端口启动 WebUI（可在 `config/QQBot.yaml` 的 `webui` 中修改）：
 
+<p align="center">
+  <img src="docs/screenshots/logs.png" alt="运行日志" width="49%">
+  <img src="docs/screenshots/errors.png" alt="报错归档" width="49%">
+</p>
+
+<p align="center">
+  日志中心与报错归档
+</p>
+
 - 地址：`http://<服务器IP>:2580/`
 - 首次启动自动生成初始密码，打印在 TRSS 日志，也可在登录页点「打印密码到日志」（30 秒冷却）
 - **首次登录成功后必须设置自己的密码**；设置完成后不再打印初始密码
 - 功能：
   - 前端：`webui/index.html` + `webui/style.css` + `webui/app.js`（结构/样式/逻辑分离，改前端刷新即可，不用重启）
-  - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/机器人账号），带字段校验并保留原有 YAML 结构；机器人 Token 按账号拆分成分字段表单，保存时才拼装成 YAML 行；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
+  - 配置：`config/QQBot.yaml` 使用可视化表单（基础/WebUI/机器人/重连/Markdown/机器人账号），带字段校验并保留原有 YAML 结构；机器人 Token 按账号拆分成分字段表单，保存时才拼装成 YAML 行；「保存并上线」会立即连接新增/修改的机器人账号并断开已删除账号；其它 `config/*.yaml` 与 `config/config/*.yaml` 使用原始 YAML 编辑器
   - 日志：默认进入日志页即开始实时；hook 全局 `logger`（含 `Bot.makeLog`）捕获所有插件日志；支持 ANSI 彩色显示、连续滚动自动加载、全文件搜索、随时停止搜索；自动把群 openid / 成员 openid 替换成短 ID + 群名/成员名
   - 报错：按错误码归档，默认屏蔽 40034005 / 40034105 / 40034128；每条保留发送内容、调用参数、请求、响应和完整堆栈；保留 30 天
+  - 数据：浏览 `data/QQBot` 文件树，预览/编辑 JSON 和 NDJSON，上传、下载、删除、新建目录；`webui.json` 等认证文件不会显示或返回内容
+  - 沙箱：模拟群聊/私聊消息执行任意机器人指令，聊天式显示当前历史，流式追加回复；渲染 Markdown、公式、按钮、图文卡片和富媒体，不发送到真实 QQ
   - 系统状态：负载（1/5/15）、CPU、GPU（nvidia-smi）、内存、SWAP、磁盘、网络速率/网卡、Node 内存、运行时间、机器人数，3 秒自动刷新
   - 素材：查看/删除 Markdown 素材（`qqbot-media://`）
   - 群管理：群头像/群名/成员数、总指令数/今日指令、群内能力（管理员、主动消息、全量消息）、成员列表、禁言/解除/踢人、群黑名单
-  - 群聊：仿 QQ 三栏界面，群列表/成员列表每 15 秒自动刷新（页面隐藏时暂停，没有刷新按钮），消息走 SSE 实时；右键群聊可打开或退出群聊；聊天图片服务端缩略到 1200px 并缓存，避免超大截图解码卡顿；群头像用 q.qq.com / OneBot 群列表按群名匹配并缓存到 `data/QQBot/group-avatar-cache.json`，5 分钟尝试刷新，旧缓存不丢弃；成员昵称/头像/身份落盘 `data/QQBot/member-cache.json` 永久保存（缓存 5 分钟只用于控制读取频率，不删除旧成员）；右键成员可 @、按自定义时长禁言、解除、踢出，右键消息可复制文字/图片/链接、引用回复、撤回；@ 会去掉“机器人appid:”前缀；发送失败的消息显示红色感叹号，可点击重试；支持搜索群名、发送文本、Markdown/LaTeX（含 QQ `[#32px #32px](url)` 图片尺寸语法）、粘贴图片、选择本地图片；Markdown 附件占位符会剥离，图片/文件按卡片展示；引用消息里的 @openid 自动显示昵称（包括机器人昵称）；输入框可拖高；记录最多保留 24 小时并落盘
+  - 群聊：仿 QQ 三栏界面，群列表/成员列表每 15 秒自动刷新（页面隐藏时暂停，没有刷新按钮），消息走 SSE 实时；右键群聊可打开或退出群聊；聊天图片服务端缩略到 1200px 并缓存，避免超大截图解码卡顿；群头像用 QQ 开放平台 / OneBot 群列表按群名匹配并缓存到 `data/QQBot/group-avatar-cache.json`，5 分钟尝试刷新，旧缓存不丢弃；成员昵称/头像/身份落盘 `data/QQBot/member-cache.json` 永久保存（缓存 5 分钟只用于控制读取频率，不删除旧成员）；右键成员可 @、按自定义时长禁言、解除、踢出，右键消息可复制文字/图片/链接、引用回复、撤回；@ 会去掉“机器人appid:”前缀；发送失败的消息显示红色感叹号，可点击重试；支持搜索群名、发送文本、Markdown/LaTeX（含 QQ `[#32px #32px](url)` 图片尺寸语法）、粘贴图片、选择本地图片；Markdown 附件占位符会剥离，图片/文件按卡片展示；引用消息里的 @openid 自动显示昵称（包括机器人昵称）；输入框可拖高；记录最多保留 24 小时并落盘
   - 本地群统计：按群记录消息量、指令使用量、每日趋势，保存在 `data/QQBot/group-stats.json`
   - 菜单/指令面板：自定义菜单 JSON 编辑、指令面板创建/删除，内置可用的菜单/面板示例
-  - 运营数据：今天 / 昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围
+  - 运营数据：昨天 / 近 7 天 / 近 14 天 / 近 30 天 / 本月 / 总览 / 自定义范围（QQ 不提供当天数据，默认不显示「今天」）
   - 本地历史：WebUI 启动、登录和每 6 小时自动拉取官方 30 天数据并落盘 `data/QQBot/stats-history.json`，范围可以逐步超过 30 天；历史从启用本地采集后开始积累，官方不提供更早的回溯
   - 完整指标：活跃/消息/好友/群/频道、新增/回流、回复数/回复率/首回率、响应时间/轮次、用户画像（年龄/性别/地区）、群分布（分类/规模）、趋势图、全字段表格、JSON 导出
   - 前端增强：趋势图、命令面板（Ctrl+K）、日志搜索/暂停/下载、自动刷新、深色/浅色主题、移动端侧边栏
+
+### 群聊右键菜单
+
+<p align="center">
+  <img src="docs/screenshots/chat-rightclick.png" alt="群聊右键：@、引用、禁言、踢人、退出群聊" width="92%">
+</p>
+
+在一个机器人拥有管理员权限的群里：
+
+- 右键群列表：打开群聊 / **退出群聊**
+- 右键成员：**@ 成员** / **禁言** / 解除禁言 / **踢出群**
+- 右键消息：复制 / **引用回复** / 撤回
+
+图中鼠标指针为演示叠加，实际菜单会出现在右键位置。
+
+### 运营数据（近 30 天）
+
+<p align="center">
+  <img src="docs/screenshots/stats-30d.png" alt="近 30 天运营数据" width="82%">
+</p>
+
+展示活跃用户、消息量、回复率、好友/群库存、详细指标和用户画像；支持近 7 / 14 / 30 天、本月、总览和自定义范围。
+
+> QQ 开放平台不提供当天数据，所以 WebUI 不显示「今天」。
 
 ### Docker 反向代理
 
@@ -468,7 +511,7 @@ location /qqbot-webui/ {
 
 ### QQ 开放平台登录
 
-运营数据来自 `q.qq.com` 后台接口，需要 QQ 开放平台登录态。WebUI 支持两种方式：
+运营数据来自 `q.qq.com/qqbot/dashboard` 后台接口，需要 QQ 开放平台登录态。WebUI 支持两种方式：
 
 **扫码登录（推荐）**
 
@@ -479,13 +522,97 @@ location /qqbot-webui/ {
 
 **粘贴 Cookie**
 
-1. 浏览器登录 https://q.qq.com ，打开开发者后台
+1. 浏览器登录 https://q.qq.com/qqbot/dashboard，打开开发者后台
 2. F12 → Network，复制任意请求的 `Cookie` 请求头
 3. WebUI →「QQ 登录」→ 粘贴 Cookie → 保存
 
 > 官方数据接口只提供最近 7/14/30 天；本月、总览、自定义范围基于 30 天数据计算。
 
+## 📁 数据文件
+
+WebUI 新增「数据」页，用于管理：
+
+```text
+data/QQBot/
+```
+
+<p align="center">
+  <img src="docs/screenshots/data.png" alt="数据文件管理" width="82%">
+</p>
+
+支持：
+
+- 目录浏览、上级目录
+- JSON / NDJSON / JSONL 文本预览
+- JSON 自动格式化
+- 在线编辑并保存
+- 下载文件
+- 上传文本文件（最大 5MB）
+- 删除文件或目录
+- 新建目录
+- 顶部显示整个 `data/QQBot` 的总占用、文件数和目录数
+- 超过 2MB 的文件只预览前 2MB，可下载查看
+
+安全限制：
+
+- `webui.json` 等包含 WebUI 密码 / QQ Cookie 的文件不会出现在列表里
+- 所有路径限制在 `data/QQBot` 内
+- 拒绝 `..` 路径穿越和符号链接
+- 需要 WebUI 登录后才能访问
+
+> 管理数据文件属于高风险操作，删除前请先下载备份。
+
+---
+
+## 🧪 指令沙箱
+
+WebUI 新增「沙箱」页：
+
+<p align="center">
+  <img src="docs/screenshots/sandbox.png" alt="指令沙箱：聊天式对话、当前历史、任意指令" width="82%">
+</p>
+
+- 模拟群聊 / 私聊事件，直接输入任意机器人指令
+- 可选择 master 权限
+- 不连接 QQ，不会把消息发送到真实群或好友
+- 像聊天页一样显示「你一句、机器人一句」和当前页面历史
+- 回复通过流式接口实时追加，不再固定等待
+- 捕获插件回复并渲染：
+  - Markdown
+  - KaTeX 行内 / 块级公式
+  - 图片、语音、视频、文件
+  - 键盘按钮（点击会重新执行相同指令）
+  - 官方 `msg_type=8` 图文卡片
+  - 原始回复 JSON
+
+示例指令：
+
+```text
+#qqbot测试
+#qqbot图文1
+#qqbot图文2
+#qqbot图文3
+#qqbot卡片1
+#qqbot卡片2
+#qqbot卡片3
+#qqbot公式
+#qqbot媒体
+```
+
+> 沙箱只使用内存中的假 Bot；这能避免真实发送，但插件自身的网络/文件操作仍然可能发生。测试未知指令时请谨慎。
+
+---
+
 ## 测试插件（example/qqbot-test.js）
+
+<p align="center">
+  <img src="docs/screenshots/card.png" alt="QQ 官方图文卡片效果" width="46%">
+  <img src="docs/screenshots/markdown.png" alt="彩色公式与键盘按钮" width="46%">
+</p>
+
+<p align="center">
+  <code>#qqbot卡片1</code> 与 <code>#qqbot公式</code> 在 QQ 客户端的实际效果
+</p>
 
 **不会随适配器一起加载**；复制到 `plugins/example/` 后由 TRSS 作为独立插件加载。安装插件后首次启动会自动复制到 `TRSS-Yunzai/plugins/example/qqbot-test.js`（如果该文件已存在则不会覆盖，更新测试插件请手动替换）。也可以在仓库里手动下载该文件放到 `plugins/example/`。
 
@@ -503,8 +630,14 @@ location /qqbot-webui/ {
 | `#qqbot引用消息` | 读取被引用消息内容（支持 `msg_elements` 引用） |
 | `#qqbot撤回` | 撤回测试消息；引用消息时撤回被引用那条 |
 | `#qqbot连发` | 连续发送 10 条消息（测试被动回复消息池） |
-| `#qqbot9MB` | 发送一张 9MB 测试图片（URL，不压缩，素材上传/大图测试） |
-| `#qqbot图文` | 发送一条图文卡片消息（群聊/单聊） |
+| `#qqbot大图` | 发送一张测试大图（URL，不压缩，素材上传/大图测试；兼容 `#qqbot9MB`） |
+| `#qqbot图文` | ARK 图文卡片 + 内嵌键盘按钮（群聊/单聊） |
+| `#qqbot图文1` | Markdown 图文卡片：图片 + 正文 + 单按钮 |
+| `#qqbot图文2` | Markdown 图文卡片：双图 + 信息表格 |
+| `#qqbot图文3` | Markdown 图文卡片：图片 + 多行按钮操作 |
+| `#qqbot卡片1/2/3` | 官方 `msg_type=8` 图文卡片（tuwen），标题/描述/链接/图片 |
+| `#qqbot公式` | 彩色 KaTeX 公式、渐变文字、表格和键盘按钮测试 |
+| `#qqbot媒体` | 图片、语音、视频、群文件和 QQ 风格按钮测试 |
 | `#qqbotwebui` | 查看 WebUI 地址和密码位置 |
 | `#qqbot登录` | 查看 QQ 开放平台登录方式（WebUI 导入 Cookie） |
 | `#qqbot数据 [today/yesterday/7d/14d/30d]` | 查看运营数据 |
@@ -516,7 +649,7 @@ location /qqbot-webui/ {
 
 权限：群管理命令要求发送者是 TRSS master 或群主/管理员；测试插件顶部有 `SKIP_PERMISSION_CHECK` 开关（默认 `false`）。
 
-`#qqbot9MB` 使用公网图片 `https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg`（约 9MB），并标记 `noCompress`，**不经过图片压缩**。
+`#qqbot大图` 使用安全的公网测试图片，并标记 `noCompress`，**不经过图片压缩**。旧命令 `#qqbot9MB` 仍兼容。
 
 ### user_id 格式与 master 配置
 
@@ -572,6 +705,7 @@ master:
 - 同一条群消息最多回复 5 条；插件会用 110 秒内的其它消息 ID 续接，长时间没有新消息时只能走主动消息（受主动消息配额限制）
 - 素材上传需要开放平台相应接口权限，失败时会自动回退公网 URL
 - 群内全量消息需要在群设置中由群主开启「接收所有消息」
+- 群聊踢人接口需要企业认证；个人开发者机器人即使拥有群管理员权限，也无法使用踢人功能
 
 ## 测试
 

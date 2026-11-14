@@ -33,9 +33,9 @@ const atIds = e => atMembers(e).map(i => rawId(i.qq))
 const roleText = role => ({ owner: "群主", admin: "管理员", member: "普通成员" })[role] || role || "未知"
 const errText = err => err?.message || err?.toString?.() || "未知错误"
 
-/** 9MB 测试图（公网 URL） */
+/** 大图测试图（公网 URL） */
 const BIG_IMAGE_URL =
-  "https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg"
+  "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png"
 
 const sdkOf = e => e.bot?.sdk
 const rawGroup = e => rawId(e.group_id)
@@ -120,6 +120,14 @@ export class QQBotAdapterTest extends plugin {
         { reg: "^#qqbot(连发|发送10条)$", fnc: "burst" },
         { reg: "^#qqbot(9[Mm][Bb]?|大图)$", fnc: "bigImage" },
         { reg: "^#qqbot(图文|卡片)$", fnc: "card" },
+        { reg: "^#qqbot图文1$", fnc: "imageCardDaily" },
+        { reg: "^#qqbot图文2$", fnc: "imageCardGrid" },
+        { reg: "^#qqbot图文3$", fnc: "imageCardActions" },
+        { reg: "^#qqbot卡片1$", fnc: "tuwenCardOne" },
+        { reg: "^#qqbot卡片2$", fnc: "tuwenCardTwo" },
+        { reg: "^#qqbot卡片3$", fnc: "tuwenCardThree" },
+        { reg: "^#qqbot公式$", fnc: "formulaCard" },
+        { reg: "^#qqbot媒体$", fnc: "richMedia" },
         { reg: "^#qqbot(webui|WebUI)$", fnc: "webui" },
         { reg: "^#qqbot登录$", fnc: "qqLogin" },
         { reg: "^#qqbot数据(.*)$", fnc: "stats" },
@@ -164,8 +172,14 @@ export class QQBotAdapterTest extends plugin {
         "QQBot 适配器测试命令：",
         "#qqbot撤回 —— 发送一条测试消息并撤回（引用消息时撤回被引用的那条）",
         "#qqbot连发 —— 连续发送 10 条消息（测试被动回复消息池）",
-        "#qqbot9MB —— 发送一张 9MB 测试图片（素材上传/大图测试）",
-        "#qqbot图文 —— 发送一条图文卡片消息（群聊/单聊）",
+        "#qqbot大图 —— 发送一张大图（公网 URL，素材上传/大图测试）",
+        "#qqbot图文 —— 发送一条 ARK 图文卡片（群聊/单聊）",
+        "#qqbot图文1 —— Markdown 图文卡片：图片 + 正文 + 单按钮",
+        "#qqbot图文2 —— Markdown 图文卡片：双图 + 信息列表",
+        "#qqbot图文3 —— Markdown 图文卡片：图片 + 多按钮操作",
+        "#qqbot卡片1/2/3 —— 官方 msg_type=8 图文卡片（tuwen）",
+        "#qqbot公式 —— Markdown 公式 + 图片 + 按钮测试",
+        "#qqbot媒体 —— 图片 / 语音 / 视频 / 群文件 / 按钮样式测试",
         "#qqbotwebui —— 查看 WebUI 地址和密码位置",
         "#qqbot登录 —— 查看 QQ 开放平台登录方式（WebUI 导入 Cookie）",
         "#qqbot数据 [today/yesterday/7d/14d/30d] —— 查看运营数据",
@@ -263,20 +277,244 @@ export class QQBotAdapterTest extends plugin {
   async card() {
     const e = this.e
     if (!isQQBot(e)) return false
-    await e.reply({
+    const card = {
       type: "card",
       content: {
         title: "QQ 官方机器人 · 图文卡片",
         description: "来自 qq-official-bot-plugin 的图文卡片消息测试",
         url: "https://github.com/XingYunStar/qq-official-bot-plugin",
         pic_url:
-          "https://img.likefirefly.com/image.Firefly?file=illust_116147020_20240428_011746.jpg",
+          "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
       },
-    })
+    }
+    const keyboard = segment.button(
+      [
+        { text: "打开项目", link: "https://github.com/XingYunStar/qq-official-bot-plugin" },
+        { text: "再来一张", input: "#qqbot图文" },
+      ],
+      [{ text: "官方卡片", input: "#qqbot卡片1" }],
+    )
+    await e.reply([card, keyboard])
     return true
   }
 
-  /** 发送一张 9MB 图片（公网 URL），测试素材上传/大图压缩 */
+  /** 图文卡片：图片 + Markdown + 可选键盘按钮 */
+  async sendImageCard(e, { title, subtitle, image, body = [], buttons = [] }) {
+    const lines = [
+      `# ${title}`,
+      subtitle ? `> ${subtitle}` : "",
+      "",
+      ...(image ? [`![${title} #800px #420px](${image})`, ""] : []),
+      ...body,
+    ].filter((line, i, list) => line !== "" || list[i - 1] !== "")
+    const parts = [segment.markdown({ content: lines.join("\n") })]
+    if (buttons.length) {
+      const rows = buttons.map(row => row.map((btn, i) => ({
+        id: `qqbot_test_${Date.now().toString(36)}_${row.length}_${i}`.slice(0, 32),
+        render_data: {
+          label: btn.label,
+          visited_label: btn.visited || btn.label,
+          style: btn.style ?? 1,
+        },
+        action: {
+          type: 2,
+          permission: { type: 2 },
+          data: btn.data,
+          enter: true,
+          unsupport_tips: "当前客户端不支持按钮，请发送命令",
+        },
+      })))
+      parts.push(segment.raw({ type: "keyboard", content: { rows } }))
+    }
+    return e.reply(parts)
+  }
+
+  /**
+   * 官方 msg_type=8 图文卡片（tuwen）。
+   * 文档：https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html#schema-messagecard
+   * 限制：title 1-50，description 1-200，url/pic_url 必须是 https 且不超过 1024 字符。
+   */
+  async sendTuwenCard(e, content) {
+    const card = {
+      type: "tuwen",
+      content: {
+        title: String(content.title || "").slice(0, 50),
+        description: String(content.description || "").slice(0, 200),
+        url: String(content.url || ""),
+        pic_url: String(content.pic_url || ""),
+      },
+    }
+    if (!card.content.url.startsWith("https://") || !card.content.pic_url.startsWith("https://"))
+      return e.reply("图文卡片要求 url 和 pic_url 都使用 https")
+    return e.reply({ type: "card", content: card.content })
+  }
+
+  async formulaCard() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    const colors = ["#425574", "#508494", "#65866c", "#3c969c", "#71acaf", "#4cc3c6", "#7dc8a4", "#9fd08a", "#dfe482", "#eee89d", "#e8e390", "#f6b65b", "#e77a22", "#d35303"]
+    const bar = colors.map(c => `\\colorbox{${c}}{\\hspace{9pt}}`).join("")
+    const rainbow = [
+      ["点", "#425574"], ["燃", "#508494"], ["星", "#3c969c"], ["海", "#4cc3c6"],
+    ].map(([t, c]) => `\\textcolor{${c}}{\\textbf{${t}}}`).join("")
+    const firefly = [
+      ["F", "#7dc8a4"], ["i", "#9fd08a"], ["r", "#dfe482"], ["e", "#eee89d"],
+      ["f", "#e8e390"], ["l", "#f6b65b"], ["y", "#e77a22"],
+    ].map(([t, c]) => `\\textcolor{${c}}{\\textbf{${t}}}`).join("")
+    const latex = String.raw`$$
+\begin{array}{c}
+${bar} \\[5pt]
+${rainbow} \\[3pt]
+${firefly} \\[3pt]
+\textcolor{#d35303}{\textbf{AR-26710}} \\[5pt]
+\colorbox{#ffb6c1}{\textcolor{white}{\small\ \ 流萤 · 星穹铁道\ \ }} \\[4pt]
+${bar}
+\end{array}
+$$`
+    const content = [
+      "# 公式与 Markdown 测试",
+      "> KaTeX / 渐变色 / 表格 / 键盘按钮",
+      "",
+      "行内公式：$\\textcolor{#4cc3c6}{a^2+b^2=c^2}$",
+      "",
+      latex,
+      "",
+      "| 功能 | 状态 |",
+      "| --- | --- |",
+      "| Markdown | 正常 |",
+      "| KaTeX 颜色 | 正常 |",
+      "| 表格 | 正常 |",
+      "| 按钮 | 正常 |",
+    ].join("\n")
+    const keyboard = segment.button(
+      [
+        { text: "重新渲染", input: "#qqbot公式" },
+        { text: "官方卡片", input: "#qqbot卡片1" },
+      ],
+      [{ text: "打开项目", link: "https://github.com/XingYunStar/qq-official-bot-plugin" }],
+    )
+    return e.reply([segment.markdown({ content }), keyboard])
+  }
+
+  async richMedia() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return e.reply([
+      segment.text("QQ 消息样式测试：图片 / 语音 / 视频 / 群文件 / 按钮"),
+      segment.image("https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png"),
+      segment.record("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
+      segment.video("https://www.w3schools.com/html/mov_bbb.mp4"),
+      { ...segment.file("https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", "QQBot 测试文件.pdf"), size: 13264 },
+      segment.button([{ text: "播放语音", callback: "qqbot_media_voice" }, { text: "下载文件", link: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" }]),
+    ])
+  }
+
+  async tuwenCardOne() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return this.sendTuwenCard(e, {
+      title: "QQBot Plugin 图文卡片",
+      description: "官方 msg_type=8 · tuwen 卡片测试：标题、描述、跳转链接和图片。",
+      url: "https://github.com/XingYunStar/qq-official-bot-plugin",
+      pic_url: "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
+    })
+  }
+
+  async tuwenCardTwo() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return this.sendTuwenCard(e, {
+      title: "TRSS-Yunzai QQBot 适配器",
+      description: "支持群聊、频道、Markdown、键盘、引用、素材、WebUI 和数据管理。",
+      url: "https://github.com/XingYunStar/qq-official-bot-plugin#readme",
+      pic_url: "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
+    })
+  }
+
+  async tuwenCardThree() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return this.sendTuwenCard(e, {
+      title: "流萤日报 · 测试卡片",
+      description: "这是一条不会跳转到真实业务的测试图文卡片，用于验证 msg_type=8 发送。",
+      url: "https://q.qq.com/qqbot/profile/?robot_uin=3889049339",
+      pic_url: "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
+    })
+  }
+
+  /** 单图 + 正文 + 单按钮 */
+  async imageCardDaily() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return this.sendImageCard(e, {
+      title: "流萤日报",
+      subtitle: "来自 qq-official-bot-plugin 的 Markdown 图文卡片",
+      image: "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
+      body: [
+        "## 今日状态",
+        "- 在线：**正常**",
+        "- 适配器：qq-official-bot 1.3.4",
+        "- 功能：图片、Markdown、按钮、引用回复",
+        "",
+        "> 这是一张测试卡片，不包含真实业务数据。",
+      ],
+      buttons: [[{ label: "再来一张", data: "#qqbot图文1", style: 1 }]],
+    })
+  }
+
+  /** 双图 + 信息列表 */
+  async imageCardGrid() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    const image1 = "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png"
+    const image2 = "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png"
+    return e.reply([
+      segment.markdown({
+        content: [
+          "# QQBot 功能展示",
+          "> 双图卡片 · Markdown 排版",
+          "",
+          `![流萤 #360px #240px](${image1}) ![星穹 #360px #240px](${image2})`,
+          "",
+          "| 能力 | 状态 |",
+          "| --- | --- |",
+          "| 群消息 | 已接入 |",
+          "| Markdown | 已支持 |",
+          "| 按钮 | 已支持 |",
+          "| 素材 | qqbot-media:// |",
+        ].join("\n"),
+      }),
+    ])
+  }
+
+  /** 图片 + 多按钮操作 */
+  async imageCardActions() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    return this.sendImageCard(e, {
+      title: "操作卡片",
+      subtitle: "图文 + 键盘按钮测试",
+      image: "https://act-upload.mihoyo.com/sr-wiki/2026/02/13/324957497/a47606da012e2ee3e869f0a9b87a01ae_6065535796741131488.png",
+      body: [
+        "点击下方按钮可以执行对应命令。",
+        "",
+        "- **再来一张**：重新发送图文1",
+        "- **功能列表**：查看帮助",
+        "- **原始事件**：输出本条消息原始字段",
+      ],
+      buttons: [
+        [
+          { label: "再来一张", data: "#qqbot图文1", style: 1 },
+          { label: "功能列表", data: "#qqbot测试", style: 0 },
+        ],
+        [
+          { label: "原始事件", data: "#qqbot原始", style: 1 },
+        ],
+      ],
+    })
+  }
+
+  /** 发送一张大图（公网 URL），测试素材上传/大图压缩 */
   async bigImage() {
     const e = this.e
     if (!isQQBot(e)) return false
@@ -285,7 +523,7 @@ export class QQBotAdapterTest extends plugin {
     // 大图测试：跳过适配器的压缩（默认会压到 imageLength，3MB）
     image.noCompress = true
     await e.reply(image)
-    logger.mark(`[qqbot-test] 已发送 9MB 测试图片（不压缩）：${BIG_IMAGE_URL}`)
+    logger.mark(`[qqbot-test] 已发送大图测试（不压缩）：${BIG_IMAGE_URL}`)
     return true
   }
 

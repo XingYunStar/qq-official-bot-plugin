@@ -221,10 +221,25 @@ export function normalizeChatContent(msg) {
         break
       case "card": {
         const c = i.data?.content || i.content || {}
-        out.push({ type: "card", text: c.title || "图文卡片", url: c.url || "" })
+        out.push({
+          type: "card",
+          text: c.title || "图文卡片",
+          title: c.title || "图文卡片",
+          description: c.description || "",
+          url: c.url || "",
+          pic_url: c.pic_url || "",
+        })
         break
       }
-      case "button":
+      case "button": {
+        const rows = Array.isArray(i.data)
+          ? i.data
+          : (i.data?.content?.rows || i.data?.rows || i.buttons || [])
+        out.push({ type: "keyboard", rows })
+        break
+      }
+      case "keyboard":
+        out.push({ type: "keyboard", rows: i.rows || i.data?.content?.rows || [] })
         break
       default:
         if (i.text) out.push({ type: "text", text: i.text })

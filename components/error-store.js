@@ -157,6 +157,10 @@ export class ErrorStore {
     return this.queue
   }
 
+  codeOf(args) {
+    try { return collectCode(args, new Set()) || "" } catch { return "" }
+  }
+
   isIgnored(args) {
     try {
       const code = collectCode(args, new Set()) || "unknown"

@@ -78,11 +78,26 @@ let state = {
   chatRefreshTimer: null, chatGroupsSig: "", chatMembersSig: "",
   logLevel: localStorage.getItem("qqbot_log_level") || "info", logRenderTimer: null, logRenderScroll: false,
   logWindowStart: 0, logWindowEnd: 0, logWindowTotal: 0, logWindowMode: "none", logWindowLoading: false,
-  logHighlightQuery: "", logFocusLine: -1, logSearching: false, logSearchController: null,
+  logHighlightQuery: "", logFocusLine: -1, logSearching: false, logSearchController: null, logLiveDomCount: 0,
+  logLiveQueue: [], logLiveTimer: null,
   errorCode: "all", errorCodes: [], errorLimit: 200, errorEntries: [], errorOffset: 0, errorHasMore: false, errorTotal: 0,
+  dataPath: "", dataParent: "", dataCurrent: null, dataEditing: false,
+  sandboxBusy: false, sandboxHistory: [], sandboxController: null,
   chatMembers: [], chatMembersLocalOnly: false, chatBotRole: "", chatReply: null, chatMentions: [], chatMap: new Map(),
 }
-const toast = msg => { const t=$("#toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2200) }
+let toastTimer = null
+const toast = (msg, sticky = false) => {
+  const t = $("#toast")
+  $("#toastMsg").textContent = String(msg ?? "")
+  t.classList.toggle("sticky", !!sticky)
+  t.classList.add("on")
+  clearTimeout(toastTimer)
+  if (!sticky) toastTimer = setTimeout(() => t.classList.remove("on"), 2200)
+}
+$("#toastClose").onclick = () => {
+  clearTimeout(toastTimer)
+  $("#toast").classList.remove("on")
+}
 async function api(url, opts={}) {
   const res = await fetch(url, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts })
   const data = await res.json().catch(() => ({}))
@@ -177,6 +192,8 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "stats") { loadStats(state.range); loadGroupStats() }
   if (b.dataset.tab === "logs") { loadLogs(); startLogLive() }
   if (b.dataset.tab === "errors") loadErrors()
+  if (b.dataset.tab === "data") loadDataDir(state.dataPath)
+  if (b.dataset.tab === "sandbox") $("#sbxCommand")?.focus()
   if (b.dataset.tab === "materials") loadMaterials()
   if (b.dataset.tab === "groups") loadGroups()
   if (b.dataset.tab === "chat") { loadChatGroups(); startChatRefresh() }
@@ -450,7 +467,7 @@ function configField(label, path, value, type = "text", hint = "", options = nul
 function renderConfigForm(data) {
   const botIds = (data.token || []).map(line => parseTokenFields(line).id).filter(Boolean)
   const md = data.markdown || {}
-  const modeOptions = [["raw", "raw（自动）"], ["inline", "inline（内联）"], ["legacy", "legacy（普通）"]]
+  const modeOptions = [["raw", "raw（Markdown 按钮消息）"], ["inline", "inline（Markdown 消息）"], ["legacy", "legacy（普通消息，不用 Markdown）"]]
   const mdRows = botIds.map(id => `<div class="md-mode-row"><code>${esc(id)}</code><select data-md-bot="${esc(id)}">${modeOptions.map(([v,t]) => `<option value="${v}" ${(md[id] || "raw") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>`).join("")
   $("#cfgForm").innerHTML = `
     <div class="config-card full">
@@ -465,7 +482,7 @@ function renderConfigForm(data) {
       ${configField("图片压缩阈值（MB）", "imageLength", data.imageLength ?? 3, "number", "0 表示不压缩")}
       ${configField("二维码模式", "toQRCode", data.toQRCode === "link" ? "link" : (data.toQRCode === true || data.toQRCode === "true") ? "true" : "false", "select", "", [["true", "直接二维码"], ["link", "链接"], ["false", "关闭"]])}
       ${configField("回调按钮", "toCallback", !!data.toCallback, "checkbox")}
-      ${configField("上传官方素材", "toBotUpload", !!data.toBotUpload, "checkbox")}
+      ${configField("图片发送方式", "toBotUpload", data.toBotUpload === false ? "url" : "material", "select", "保存后立即生效；官方素材会转存为 qqbot-media://，公网 URL 不占素材额度", [["material", "官方素材（推荐，失败回退 URL）"], ["url", "公网 URL（直接引用）"]])}
       ${configField("隐藏频道撤回提示", "hideGuildRecall", !!data.hideGuildRecall, "checkbox")}
       ${configField("自动安装测试插件", "autoInstallExample", !!data.autoInstallExample, "checkbox")}
       ${configField("群成员/入群申请事件", "groupMemberEvent", data.groupMemberEvent !== false, "checkbox")}
@@ -494,7 +511,7 @@ function renderConfigForm(data) {
     <div class="config-card full">
       <h3>Markdown 模板</h3>
       ${configField("模板变量 ID（逗号分隔）", "markdown.template", Array.isArray(md.template) ? md.template.join(", ") : (md.template || ""), "text", "例如：102145537_1767366896；留空则不使用模板")}
-      <div class="muted" style="font-size:10px;margin:8px 0">各机器人 Markdown 模式</div>
+      <div class="muted" style="font-size:10px;margin:8px 0">消息发送方式</div>
       ${mdRows || `<div class="muted" style="font-size:11px">暂无机器人 token</div>`}
     </div>
 `
@@ -599,6 +616,7 @@ async function collectConfigForm() {
     else if (el.dataset.path === "token") value = el.value.split("\n").map(x => x.trim()).filter(Boolean)
     else if (el.dataset.path === "markdown.template") value = el.value.split(",").map(x => x.trim()).filter(Boolean)
     else if (el.dataset.path === "toQRCode") value = el.value === "true" ? true : el.value === "link" ? "link" : false
+    else if (el.dataset.path === "toBotUpload") value = el.value !== "url"
     else value = el.value
     set(el.dataset.path, value)
   })
@@ -670,20 +688,30 @@ $("#cfgMode").querySelectorAll("[data-cfg-mode]").forEach(b => b.onclick = () =>
 })
 $("#cfgText").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
 $("#cfgForm").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
-$("#cfgSave").onclick = async () => {
+async function saveConfig(apply = false) {
+  const file = $("#cfgFile").value
+  if (apply && file !== CONFIG_FORM_FILE) return toast("「保存并上线」仅支持 config/QQBot.yaml")
   try {
-    if (state.cfgMode === "form" && $("#cfgFile").value === CONFIG_FORM_FILE) {
-      const data = await api("/api/config/form", { method: "POST", body: JSON.stringify({ file: $("#cfgFile").value, values: await collectConfigForm() }) })
-      $("#cfgDirty").textContent = ""
-      toast(data.note || "已保存")
-      loadConfig()
+    let data
+    if (state.cfgMode === "form" && file === CONFIG_FORM_FILE) {
+      data = await api("/api/config/form", {
+        method: "POST",
+        body: JSON.stringify({ file, values: await collectConfigForm(), apply }),
+      })
     } else {
-      const data = await api("/api/config", { method: "PUT", body: JSON.stringify({ file: $("#cfgFile").value, content: $("#cfgText").value }) })
-      $("#cfgDirty").textContent = ""
-      toast(data.note || "已保存")
+      data = await api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ file, content: $("#cfgText").value, apply }),
+      })
     }
+    $("#cfgDirty").textContent = ""
+    toast(data.note || (apply ? "已保存并上线" : "已保存"), true)
+    await loadConfig()
+    if (apply) await loadStatus()
   } catch (e) { toast(e.message) }
 }
+$("#cfgSave").onclick = () => saveConfig(false)
+$("#cfgApply").onclick = () => saveConfig(true)
 
 /* error code archive */
 function errTime(ts) {
@@ -761,6 +789,345 @@ $("#errIgnoreSave").onclick = async () => {
     await api("/api/error-log/config", { method: "POST", body: JSON.stringify({ ignoredCodes }) })
     toast("屏蔽码已保存，历史对应记录已移除")
     await loadErrors()
+  } catch (e) { toast(e.message) }
+}
+
+/* sandbox */
+function sandboxCardHtml(card) { return qqCardHtml(card) }
+function sandboxKeyboardHtml(item) { return qqKeyboardHtml(item, true) }
+function sandboxContentHtml(content) {
+  return (content || []).map(item => {
+    if (item.type === "text") return renderRichText(item.text)
+    if (item.type === "markdown") return `<div class="sandbox-md">${renderRichText(item.text)}</div>`
+    if (item.type === "card") return qqCardHtml(item)
+    if (item.type === "keyboard") return qqKeyboardHtml(item, true)
+    if (item.type === "raw") return `<pre>${esc(JSON.stringify(item.data, null, 2))}</pre>`
+    if (["image", "record", "video", "file", "at", "reply", "face"].includes(item.type))
+      return chatContentHtml([item])
+    return item.text ? esc(item.text) : ""
+  }).join("")
+}
+function activateSandboxImages() {
+  document.querySelectorAll("#sbxMessages img[data-src]").forEach(img => {
+    img.src = img.dataset.src
+    img.removeAttribute("data-src")
+  })
+}
+function sandboxTime(ts) {
+  return new Date(ts || Date.now()).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+}
+function renderSandboxHistory() {
+  const box = $("#sbxMessages")
+  if (!box) return
+  if (!state.sandboxHistory.length) {
+    box.innerHTML = `<div class="sandbox-empty">输入指令开始聊天。历史只保留在当前页面，刷新后清空。</div>`
+    return
+  }
+  box.innerHTML = state.sandboxHistory.map(m => {
+    if (m.role === "system") return `<div class="sandbox-empty" style="padding:4px">${esc(m.text)}</div>`
+    if (m.role === "user") return `<div class="sbx-row user">
+      <div class="sbx-avatar">我</div>
+      <div class="sbx-main"><div class="sbx-name">你 · ${sandboxTime(m.time)}</div><div class="sbx-bubble">${esc(m.text)}</div></div>
+    </div>`
+    const content = m.pending && !(m.content || []).length
+      ? `<span class="sbx-typing"><i></i><i></i><i></i> 机器人正在输入…</span>`
+      : sandboxContentHtml(m.content)
+    const raw = !m.pending && m.content?.length
+      ? `<details class="sbx-raw"><summary>原始回复 JSON</summary><pre>${esc(JSON.stringify(m.content, null, 2))}</pre></details>`
+      : ""
+    return `<div class="sbx-row bot">
+      <div class="sbx-avatar">机</div>
+      <div class="sbx-main"><div class="sbx-name">机器人 · ${sandboxTime(m.time)}</div><div class="sbx-bubble ${m.pending ? "sandbox-pending" : ""}">${content}${raw}</div></div>
+    </div>`
+  }).join("")
+  activateSandboxImages()
+  box.scrollTop = box.scrollHeight
+}
+function handleSandboxEvent(ev) {
+  if (!ev || !ev.type) return
+  if (ev.type === "message" && ev.message) {
+    const current = state.sandboxHistory[state.sandboxHistory.length - 1]
+    if (current?.role === "bot" && current.pending && !current.content.length) {
+      current.content = ev.message.content || []
+      current.time = ev.message.time || Date.now()
+      current.target = ev.message.target
+      current.pending = false
+    } else {
+      state.sandboxHistory.push({
+        role: "bot",
+        content: ev.message.content || [],
+        time: ev.message.time || Date.now(),
+        target: ev.message.target,
+      })
+    }
+    $("#sbxStatus").textContent = "机器人正在输入…"
+    renderSandboxHistory()
+  }
+  if (ev.type === "done") {
+    const current = state.sandboxHistory[state.sandboxHistory.length - 1]
+    if (current?.role === "bot" && current.pending && !current.content.length) {
+      current.pending = false
+      state.sandboxHistory.push({ role: "system", text: ev.error ? `沙箱出错：${ev.error}` : "机器人没有回复。" })
+    } else if (ev.error) {
+      state.sandboxHistory.push({ role: "system", text: `沙箱出错：${ev.error}` })
+    }
+    $("#sbxStatus").textContent = ev.error ? "完成（有错误）" : "完成"
+    renderSandboxHistory()
+  }
+}
+async function runSandbox() {
+  if (state.sandboxBusy) return
+  const command = $("#sbxCommand").value.trim()
+  if (!command) return toast("请输入要测试的指令")
+  state.sandboxBusy = true
+  state.sandboxController = new AbortController()
+  state.sandboxHistory.push({ role: "user", text: command, time: Date.now() })
+  state.sandboxHistory.push({ role: "bot", content: [], pending: true, time: Date.now() })
+  $("#sbxCommand").value = ""
+  $("#sbxRun").disabled = true
+  $("#sbxStatus").textContent = "机器人正在输入…"
+  renderSandboxHistory()
+  try {
+    const res = await fetch("/api/sandbox/stream", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command,
+        scene: $("#sbxScene").value,
+        master: $("#sbxMaster").checked,
+        groupId: $("#sbxGroup").value.trim() || "sandbox.group",
+        userId: $("#sbxUser").value.trim() || "sandbox.user",
+      }),
+      signal: state.sandboxController.signal,
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || res.statusText)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop()
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try { handleSandboxEvent(JSON.parse(line)) } catch {}
+      }
+    }
+    if (buffer.trim()) {
+      try { handleSandboxEvent(JSON.parse(buffer)) } catch {}
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      state.sandboxHistory.push({ role: "system", text: "沙箱请求失败：" + e.message })
+      $("#sbxStatus").textContent = "失败"
+      renderSandboxHistory()
+    }
+  } finally {
+    state.sandboxBusy = false
+    state.sandboxController = null
+    $("#sbxRun").disabled = false
+    const current = state.sandboxHistory[state.sandboxHistory.length - 1]
+    if (current?.role === "bot" && current.pending && !current.content.length) {
+      current.pending = false
+      state.sandboxHistory.push({ role: "system", text: "机器人没有回复。" })
+      renderSandboxHistory()
+    }
+    if ($("#sbxStatus").textContent === "机器人正在输入…") $("#sbxStatus").textContent = "就绪"
+    $("#sbxCommand").focus()
+  }
+}
+$("#sbxRun").onclick = runSandbox
+$("#sbxClear").onclick = () => {
+  state.sandboxController?.abort()
+  state.sandboxHistory = []
+  $("#sbxStatus").textContent = "就绪"
+  renderSandboxHistory()
+}
+$("#sbxCommand").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runSandbox() }
+})
+document.querySelectorAll("[data-sbx-example]").forEach(btn => btn.onclick = () => {
+  $("#sbxCommand").value = btn.dataset.sbxExample
+  runSandbox()
+})
+$("#sbxMessages").addEventListener("click", e => {
+  const btn = e.target.closest("[data-sbx-cmd]")
+  if (!btn) return
+  const command = btn.dataset.sbxCmd || ""
+  if (!command) return
+  $("#sbxCommand").value = command
+  runSandbox()
+})
+
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".qq-voice-play")
+  if (!btn) return
+  const box = btn.closest(".qq-voice")
+  const audio = box?.querySelector("audio")
+  if (!audio) return
+  for (const other of document.querySelectorAll(".qq-voice audio")) {
+    if (other !== audio && !other.paused) {
+      other.pause()
+      other.closest(".qq-voice")?.classList.remove("playing")
+    }
+  }
+  if (audio.paused) {
+    audio.play().then(() => box.classList.add("playing")).catch(() => toast("语音播放失败"))
+  } else {
+    audio.pause()
+    box.classList.remove("playing")
+  }
+})
+document.addEventListener("play", e => {
+  if (e.target.tagName !== "AUDIO") return
+  e.target.closest(".qq-voice")?.classList.add("playing")
+}, true)
+document.addEventListener("pause", e => {
+  if (e.target.tagName !== "AUDIO") return
+  e.target.closest(".qq-voice")?.classList.remove("playing")
+}, true)
+document.addEventListener("loadedmetadata", e => {
+  if (e.target.tagName !== "AUDIO") return
+  const label = e.target.closest(".qq-voice")?.querySelector(".qq-voice-duration")
+  const sec = Number(e.target.duration)
+  if (label && Number.isFinite(sec) && sec > 0) label.textContent = `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`
+}, true)
+
+/* data/QQBot file manager */
+const dataSize = n => {
+  n = Number(n) || 0
+  if (n < 1024) return n + " B"
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB"
+  return (n / 1024 / 1024).toFixed(2) + " MB"
+}
+const dataTime = t => {
+  try { return new Date(t).toLocaleString("zh-CN", { hour12: false }) } catch { return "" }
+}
+function renderDataList(data) {
+  state.dataPath = data.path || ""
+  state.dataParent = data.parent || ""
+  $("#dataPath").textContent = "data/QQBot" + (state.dataPath ? "/" + state.dataPath : "")
+  $("#dataTotal").textContent = `总占用 ${dataSize(data.totalSize)} · ${data.totalFiles || 0} 个文件 / ${data.totalDirs || 0} 个目录`
+  $("#dataParent").disabled = !state.dataPath
+  const rows = data.entries || []
+  if (!rows.length) {
+    $("#dataList").innerHTML = `<div class="muted" style="padding:12px">空目录</div>`
+    return
+  }
+  $("#dataList").innerHTML = rows.map((entry, i) => `
+    <div class="data-entry ${entry.type === "dir" ? "dir" : "file"} ${state.dataCurrent?.path === entry.path ? "on" : ""}" data-di="${i}">
+      <span class="di">${entry.type === "dir" ? "▸" : "·"}</span>
+      <span class="dn">${esc(entry.name)}</span>
+      <span class="ds">${entry.type === "dir" ? "" : dataSize(entry.size)}</span>
+    </div>`).join("")
+  $("#dataList").querySelectorAll("[data-di]").forEach(el => {
+    const entry = rows[Number(el.dataset.di)]
+    el.onclick = () => entry.type === "dir" ? loadDataDir(entry.path) : openDataFile(entry.path)
+  })
+}
+async function loadDataDir(path = "") {
+  try {
+    const data = await api("/api/data/list?path=" + encodeURIComponent(path || ""))
+    state.dataCurrent = null
+    state.dataEditing = false
+    renderDataList(data)
+    $("#dataName").textContent = "选择一个文件"
+    $("#dataMeta").textContent = ""
+    $("#dataView").textContent = "左侧选择文件查看内容"
+    $("#dataView").classList.remove("hide")
+    $("#dataEditor").classList.add("hide")
+    $("#dataEditActions").classList.add("hide")
+    $("#dataEdit").disabled = true
+    $("#dataDownload").disabled = true
+    $("#dataDelete").disabled = true
+  } catch (e) { toast(e.message) }
+}
+async function openDataFile(path) {
+  try {
+    const data = await api("/api/data/read?path=" + encodeURIComponent(path))
+    state.dataCurrent = data
+    state.dataEditing = false
+    state.dataPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
+    $("#dataName").textContent = data.path.split("/").pop()
+    $("#dataMeta").textContent = `${dataSize(data.size)} · ${dataTime(data.mtime)}${data.truncated ? " · 仅预览前 2MB" : ""}`
+    $("#dataView").textContent = data.content || "(空文件)"
+    $("#dataView").classList.remove("hide")
+    $("#dataEditor").classList.add("hide")
+    $("#dataEditActions").classList.add("hide")
+    $("#dataEdit").disabled = !data.editable || data.truncated
+    $("#dataDownload").disabled = false
+    $("#dataDelete").disabled = false
+    $("#dataList").querySelectorAll(".data-entry").forEach(el => el.classList.toggle("on", el.dataset.di !== undefined && el.querySelector(".dn")?.textContent === data.path.split("/").pop()))
+  } catch (e) { toast(e.message) }
+}
+function renderDataEditor() {
+  const data = state.dataCurrent
+  if (!data) return
+  $("#dataEditor").value = data.content || ""
+  $("#dataView").classList.add("hide")
+  $("#dataEditor").classList.remove("hide")
+  $("#dataEditActions").classList.remove("hide")
+  state.dataEditing = true
+}
+async function saveDataFile() {
+  const data = state.dataCurrent
+  if (!data) return
+  $("#dataMsg").textContent = "保存中…"
+  try {
+    await api("/api/data/write", { method: "POST", body: JSON.stringify({ path: data.path, content: $("#dataEditor").value }) })
+    toast("数据文件已保存")
+    await openDataFile(data.path)
+  } catch (e) { $("#dataMsg").textContent = e.message }
+}
+async function deleteDataFile() {
+  const data = state.dataCurrent
+  if (!data) return
+  if (!confirm(`确定删除 ${data.path} 吗？`)) return
+  try {
+    await api("/api/data/delete", { method: "POST", body: JSON.stringify({ path: data.path }) })
+    toast("已删除")
+    await loadDataDir(state.dataPath)
+  } catch (e) { toast(e.message) }
+}
+$("#dataRefresh").onclick = () => loadDataDir(state.dataPath)
+$("#dataParent").onclick = () => loadDataDir(state.dataParent)
+$("#dataMkdir").onclick = async () => {
+  const name = prompt("新目录名称")
+  if (!name) return
+  const path = state.dataPath ? `${state.dataPath}/${name.replace(/^\/+|\/+$/g, "")}` : name.replace(/^\/+|\/+$/g, "")
+  try {
+    await api("/api/data/mkdir", { method: "POST", body: JSON.stringify({ path }) })
+    toast("已创建目录")
+    await loadDataDir(state.dataPath)
+  } catch (e) { toast(e.message) }
+}
+$("#dataEdit").onclick = renderDataEditor
+$("#dataCancel").onclick = () => { if (state.dataCurrent) openDataFile(state.dataCurrent.path) }
+$("#dataSave").onclick = saveDataFile
+$("#dataDelete").onclick = deleteDataFile
+$("#dataDownload").onclick = () => {
+  if (!state.dataCurrent) return
+  location.href = "/api/data/download?path=" + encodeURIComponent(state.dataCurrent.path)
+}
+$("#dataUpload").onclick = () => $("#dataFileInput").click()
+$("#dataFileInput").onchange = async () => {
+  const file = $("#dataFileInput").files?.[0]
+  $("#dataFileInput").value = ""
+  if (!file) return
+  if (file.size > 5 * 1024 * 1024) return toast("上传文本文件不能超过 5MB")
+  const content = await file.text()
+  const path = state.dataPath ? `${state.dataPath}/${file.name}` : file.name
+  try {
+    await api("/api/data/write", { method: "POST", body: JSON.stringify({ path, content }) })
+    toast("已上传")
+    await loadDataDir(state.dataPath)
+    await openDataFile(path)
   } catch (e) { toast(e.message) }
 }
 
@@ -877,7 +1244,39 @@ function renderLogs(scroll = false) {
   el.innerHTML = items.map(({ line, abs }) => {
     return `<span data-log-line="${abs}" class="${logClass(line)}">${ansiToHtml(line, re)}</span>`
   }).join("\n")
+  if (state.logWindowMode === "live") trimLiveDom()
   if (scroll) el.scrollTop = el.scrollHeight
+}
+function trimLiveDom() {
+  const el = $("#logText")
+  // 以真实 DOM 行数为准，避免状态计数和历史渲染混用后失准
+  while (el.children.length > LOG_LIVE_DOM_MAX && el.firstChild) el.removeChild(el.firstChild)
+  state.logLiveDomCount = el.children.length
+}
+function appendLiveLogLines(lines) {
+  const el = $("#logText")
+  const min = LOG_MIN[state.logLevel] ?? 2
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  const frag = document.createDocumentFragment()
+  let added = 0
+  for (const line of lines) {
+    if (typeof line !== "string") continue
+    state.logLines.push(line)
+    if (logLevelOf(line) < min) continue
+    const display = line.length > LOG_LIVE_LINE_MAX ? line.slice(0, LOG_LIVE_LINE_MAX) + " …" : line
+    const span = document.createElement("span")
+    span.className = logClass(line)
+    span.innerHTML = ansiToHtml(display, null)
+    frag.appendChild(span)
+    frag.appendChild(document.createTextNode("\n"))
+    added++
+  }
+  const max = state.logLevel === "all" || state.logLevel === "debug" ? 800 : 2000
+  if (state.logLines.length > max) state.logLines.splice(0, state.logLines.length - max)
+  if (!added) return
+  el.appendChild(frag)
+  trimLiveDom()
+  if (atBottom) el.scrollTop = el.scrollHeight
 }
 function scrollToLogLine(abs) {
   const el = $("#logText")
@@ -1022,8 +1421,12 @@ $("#logLevel").onchange = () => {
   if (state.logES) { stopLogLive(); startLogLive() }
   else renderLogs()
 }
-const LOG_WINDOW_MAX = 3000
+const LOG_WINDOW_MAX = 10000
+const LOG_WINDOW_HARD_MAX = 12000
 const LOG_WINDOW_STEP = 1000
+const LOG_LIVE_DOM_MAX = 800
+const LOG_LIVE_RENDER_INTERVAL = 500
+const LOG_LIVE_LINE_MAX = 4000
 function updateLogWindowStatus(extra = "") {
   const file = $("#logFile").value || "日志"
   $("#logStatus").textContent = `${file} · 已加载第 ${state.logWindowStart + 1}-${state.logWindowEnd} 行 / 共 ${state.logWindowTotal} 行 · 当前窗口 ${state.logLines.length} 行${extra}`
@@ -1072,7 +1475,8 @@ async function loadOlderWindow() {
     state.logLines = [...incoming, ...state.logLines]
     state.logWindowStart = data.start || 0
     state.logWindowTotal = data.total || state.logWindowTotal
-    if (state.logLines.length > LOG_WINDOW_MAX) state.logLines.splice(LOG_WINDOW_MAX)
+    // 低频率批量卸载：允许涨到 12000，再一次性收回到 10000
+    if (state.logLines.length > LOG_WINDOW_HARD_MAX) state.logLines.splice(LOG_WINDOW_MAX)
     state.logWindowEnd = state.logWindowStart + state.logLines.length
     renderLogs()
     restoreLogAnchor(anchor, beforeTop)
@@ -1099,7 +1503,7 @@ async function loadNewerWindow() {
     state.logLines.push(...incoming)
     state.logWindowEnd = currentEnd + incoming.length
     state.logWindowTotal = data.total || state.logWindowTotal
-    if (state.logLines.length > LOG_WINDOW_MAX) {
+    if (state.logLines.length > LOG_WINDOW_HARD_MAX) {
       const excess = state.logLines.length - LOG_WINDOW_MAX
       state.logLines.splice(0, excess)
       state.logWindowStart += excess
@@ -1149,6 +1553,8 @@ $("#logDownload").onclick = () => {
 function stopLogLive() {
   if (state.logES) { state.logES.close(); state.logES = null }
   if (state.logRenderTimer) { clearTimeout(state.logRenderTimer); state.logRenderTimer = null }
+  if (state.logLiveTimer) { clearTimeout(state.logLiveTimer); state.logLiveTimer = null }
+  state.logLiveQueue = []
   $("#logLive").textContent = "开启实时"
   $("#logPause").disabled = true
   if (state.logPaused) {
@@ -1172,9 +1578,27 @@ function pushLogLines(lines) {
   const max = state.logLevel === "all" || state.logLevel === "debug" ? 800 : 2000
   if (state.logLines.length > max) state.logLines.splice(0, state.logLines.length - max)
 }
+function queueLiveLogLines(lines) {
+  for (const line of lines) if (typeof line === "string") state.logLiveQueue.push(line)
+  // 高频日志只保留最近队列，避免一次刷新几千行
+  if (state.logLiveQueue.length > 1000) state.logLiveQueue.splice(0, state.logLiveQueue.length - 1000)
+  if (state.logLiveTimer) return
+  state.logLiveTimer = setTimeout(() => {
+    state.logLiveTimer = null
+    const batch = state.logLiveQueue.splice(0, 500)
+    if (batch.length) {
+      if (state.logPaused) pushLogLines(batch)
+      else appendLiveLogLines(batch)
+    }
+    if (state.logLiveQueue.length && !state.logPaused) queueLiveLogLines([])
+  }, LOG_LIVE_RENDER_INTERVAL)
+}
 function startLogLive() {
   if (state.logES) return
   state.logLines = []
+  state.logLiveDomCount = 0
+  state.logLiveQueue = []
+  if (state.logLiveTimer) { clearTimeout(state.logLiveTimer); state.logLiveTimer = null }
   closeLogSearch()
   state.logWindowMode = "live"
   renderLogs()
@@ -1184,8 +1608,8 @@ function startLogLive() {
     if (ev.data?.startsWith("{")) {
       try { lines = JSON.parse(ev.data).lines || [] } catch { lines = [ev.data] }
     } else lines = [ev.data]
-    pushLogLines(lines)
-    if (!state.logPaused) scheduleLogRender(true)
+    if (state.logPaused) pushLogLines(lines)
+    else queueLiveLogLines(lines)
   }
   es.onerror = () => { pushLogLines(["[实时日志连接断开]"]); renderLogs(true); stopLogLive() }
   state.logES = es
@@ -1961,33 +2385,85 @@ function fileSizeText(size) {
   if (n >= 1024) return (n / 1024).toFixed(1) + " KB"
   return n + " B"
 }
+function qqFileExt(name) {
+  const m = String(name || "").match(/\.([a-z0-9]{1,8})$/i)
+  return (m?.[1] || "FILE").toUpperCase().slice(0, 5)
+}
+function qqImageSrc(url) {
+  if (!/^https?:\/\//i.test(url || "")) return url
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    if (/\.(qq\.com|qq\.com\.cn|qlogo\.cn|qpic\.cn|myqcloud\.com)$/.test(host)) return mediaUrl(url)
+  } catch {}
+  return url
+}
+function qqImageHtml(i) {
+  if (!i.url) return `<span class="qq-muted">[图片]</span>`
+  const tall = i.width && i.height && i.height / i.width > 2.5
+  const dim = i.width && i.height ? ` width="${Math.min(2000, i.width)}" height="${Math.min(2000, i.height)}"` : ""
+  const style = tall ? ` style="width:min(100%,${Math.max(260, Math.min(420, i.width || 260))}px);height:auto"` : ""
+  return `<a class="qq-image-link" href="${esc(i.url)}" target="_blank" rel="noreferrer"><img class="qq-image" src="${CHAT_IMAGE_PLACEHOLDER}" data-src="${esc(qqImageSrc(i.url))}"${dim}${style} decoding="async" alt="图片"></a>`
+}
+function qqVoiceHtml(i) {
+  if (!i.url) return `<span class="qq-muted">[语音]</span>`
+  const bars = `<span class="qq-voice-wave" aria-hidden="true">${Array.from({ length: 11 }, (_, n) => `<i style="--h:${25 + ((n * 37) % 70)}%"></i>`).join("")}</span>`
+  return `<div class="qq-voice"><button type="button" class="qq-voice-play" aria-label="播放语音"><span class="qq-voice-play-ico"></span></button>${bars}<span class="qq-voice-duration">语音</span><audio preload="metadata" src="${esc(i.url)}"></audio></div>`
+}
+function qqVideoHtml(i) {
+  if (!i.url) return `<span class="qq-muted">[视频]</span>`
+  return `<div class="qq-video"><video controls preload="metadata" playsinline src="${esc(i.url)}"></video><span class="qq-video-badge">视频</span></div>`
+}
+function qqFileHtml(i) {
+  if (!i.url) return `<span class="qq-muted">[文件]${i.name ? " " + esc(i.name) : ""}</span>`
+  const size = fileSizeText(i.size)
+  return `<a class="qq-file" href="${esc(i.url)}" target="_blank" rel="noreferrer">
+    <span class="qq-file-icon"><b>${esc(qqFileExt(i.name))}</b><i></i></span>
+    <span class="qq-file-info"><b>${esc(i.name || "群文件")}</b><small>${esc(size || "文件")}${size ? " · 群文件" : ""}</small></span>
+    <span class="qq-file-dl" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span>
+  </a>`
+}
+function qqCardHost(url) {
+  try { return new URL(url).hostname.replace(/^www\./, "") } catch { return "" }
+}
+function qqCardHtml(c) {
+  const title = c.title || c.text || "图文卡片"
+  const desc = c.description || ""
+  const url = /^https?:\/\//i.test(c.url || "") ? c.url : ""
+  const pic = /^(https?:|data:)/i.test(c.pic_url || "") ? c.pic_url : ""
+  const cover = pic ? `<img class="qq-card-cover" src="${esc(qqImageSrc(pic))}" alt="${esc(title)}" loading="lazy">` : `<span class="qq-card-cover qq-card-placeholder">${esc(title.slice(0, 1))}</span>`
+  const source = qqCardHost(url)
+  return `<a class="qq-card" href="${esc(url || "#")}" ${url ? 'target="_blank" rel="noreferrer"' : ""}>
+    <span class="qq-card-body"><b>${esc(title)}</b>${desc ? `<small>${esc(desc)}</small>` : ""}${source ? `<em>${esc(source)}</em>` : ""}</span>${cover}
+  </a>`
+}
+function qqKeyboardRows(item) {
+  const rows = Array.isArray(item?.rows) ? item.rows : []
+  return rows.map(row => Array.isArray(row) ? row : (row?.buttons || [])).filter(row => row.length)
+}
+function qqKeyboardHtml(item, sandbox = false) {
+  const rows = qqKeyboardRows(item)
+  if (!rows.length) return ""
+  return `<div class="qq-keyboard">${rows.map(row => `<div class="qq-keyboard-row">${row.map(btn => {
+    const label = btn?.render_data?.label || btn?.label || btn?.text || "按钮"
+    const cmd = String(btn?.action?.data || btn?.data || btn?.input || btn?.callback || btn?.link || "")
+    const style = Number(btn?.render_data?.style ?? btn?.style ?? 0)
+    const cls = style === 1 ? "qq-btn blue" : "qq-btn gray"
+    return `<button type="button" class="${cls}" ${sandbox && cmd ? `data-sbx-cmd="${esc(cmd)}"` : ""} title="${esc(cmd)}">${esc(label)}</button>`
+  }).join("")}</div>`).join("")}</div>`
+}
 function chatContentHtml(content) {
   return (content || []).map(i => {
     if (i.type === "text") return renderRichText(i.text)
     if (i.type === "face" && String(i.text || "").trim() === "[表情 0]") return ""
-    if (i.type === "at") return `<span class="tag" data-at="${esc(i.text)}">${esc(resolveAtMentions(i.text))}</span>`
-    if (i.type === "image") {
-      if (!i.url) return `<span class="muted">[图片]</span>`
-      const tall = i.width && i.height && i.height / i.width > 2.5
-      const dim = i.width && i.height ? ` width="${Math.min(2000, i.width)}" height="${Math.min(2000, i.height)}"` : ""
-      const style = tall ? ` style="width:min(100%,${Math.max(260, Math.min(420, i.width || 260))}px);height:auto"` : ""
-      const lazySrc = esc(mediaUrl(i.url))
-      return `<a class="msg-image-link" href="${esc(i.url)}" target="_blank" rel="noreferrer"><img class="msg-image" src="${CHAT_IMAGE_PLACEHOLDER}" data-src="${lazySrc}"${dim}${style} decoding="async" alt="图片"></a>`
-    }
-    if (i.type === "record") return i.url ? `<audio controls src="${esc(i.url)}"></audio>` : `<span class="muted">[语音]</span>`
-    if (i.type === "video") return i.url ? `<video controls src="${esc(i.url)}"></video>` : `<span class="muted">[视频]</span>`
-    if (i.type === "file") {
-      if (!i.url) return `<span class="muted">[文件]</span>`
-      const size = fileSizeText(i.size)
-      return `<a class="file-card" href="${esc(i.url)}" target="_blank" rel="noreferrer">
-        <span class="file-icon">📄</span>
-        <span class="file-info"><b>${esc(i.name || "群文件")}</b>${size ? `<small>${esc(size)}</small>` : ""}</span>
-        <span class="file-action">下载</span>
-      </a>`
-    }
+    if (i.type === "at") return `<span class="qq-at" data-at="${esc(i.text)}">${esc(resolveAtMentions(i.text))}</span>`
+    if (i.type === "image") return qqImageHtml(i)
+    if (i.type === "record") return qqVoiceHtml(i)
+    if (i.type === "video") return qqVideoHtml(i)
+    if (i.type === "file") return qqFileHtml(i)
     if (i.type === "markdown") return renderRichText(i.text)
-    if (i.type === "card") return i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noreferrer">${esc(i.text)}</a>` : `<span>${esc(i.text)}</span>`
-    if (i.type === "reply") return `<span class="tag">${esc(i.text)}</span>`
+    if (i.type === "card") return qqCardHtml(i)
+    if (i.type === "keyboard") return qqKeyboardHtml(i)
+    if (i.type === "reply") return `<span class="qq-reply-tag">${esc(i.text || "引用消息")}</span>`
     return i.text ? esc(i.text) : ""
   }).join("")
 }
@@ -2401,6 +2877,8 @@ const TAB_META = {
   config: ["配置中心", "在线编辑 QQBot 与 TRSS YAML 配置"],
   logs: ["运行日志", "历史日志与 SSE 实时日志"],
   errors: ["机器人报错", "按错误码查看近 30 天 QQBot 报错"],
+  data: ["数据文件", "查看、编辑、上传和清理 data/QQBot"],
+  sandbox: ["指令沙箱", "模拟消息并测试机器人指令回复"],
   system: ["系统状态", "负载、CPU、GPU、内存、SWAP、磁盘与网络"],
   materials: ["素材管理", "Markdown / 图片素材复用与清理"],
   groups: ["群管理", "成员、禁言、踢人与黑名单"],
@@ -2473,6 +2951,8 @@ const PALETTE_ACTIONS = [
   { label: "运营数据", icon: "01", hint: "Alt+1", run: () => switchTab("stats") },
   { label: "配置中心", icon: "02", hint: "Alt+2", run: () => switchTab("config") },
   { label: "运行日志", icon: "03", hint: "Alt+3", run: () => switchTab("logs") },
+  { label: "数据文件", icon: "DB", run: () => switchTab("data") },
+  { label: "指令沙箱", icon: "SB", run: () => switchTab("sandbox") },
   { label: "系统状态", icon: "04", hint: "Alt+4", run: () => switchTab("system") },
   { label: "素材管理", icon: "04", hint: "Alt+4", run: () => switchTab("materials") },
   { label: "群管理", icon: "05", hint: "Alt+5", run: () => switchTab("groups") },

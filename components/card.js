@@ -34,18 +34,25 @@ export function cardToText(el) {
   return [content.title, content.description, content.url].filter(Boolean).join("\n")
 }
 
-/** 图文卡片只能单独成条，把卡片从普通消息里拆出来 */
+/**
+ * 图文卡片只能单独成条，但卡片可以携带内嵌键盘。
+ * 把紧跟在卡片后的 button / raw keyboard 合并到同一条，避免按钮丢失。
+ */
 export function splitCardMessages(msg) {
   const list = Array.isArray(msg) ? msg : [msg]
+  const isKeyboard = i => i && typeof i === "object" && (i.type === "button" || (i.type === "raw" && i.data?.type === "keyboard"))
   const parts = []
   let batch = []
-  for (const i of list) {
+  for (let index = 0; index < list.length; index++) {
+    const i = list[index]
     if (i && typeof i === "object" && i.type === "card") {
       if (batch.length) {
         parts.push(batch)
         batch = []
       }
-      parts.push([i])
+      const cardPart = [i]
+      while (isKeyboard(list[index + 1])) cardPart.push(list[++index])
+      parts.push(cardPart)
     } else batch.push(i)
   }
   if (batch.length) parts.push(batch)

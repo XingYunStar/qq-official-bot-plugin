@@ -21,9 +21,32 @@
 
 ---
 
+## 📅 2026-11-15
+
+> 整理 `dev` 相对 `main` 的历史提交，将本轮 WebUI、测试插件和 README 更新合并为一个提交。
+
+### ✨ 本次汇总
+
+- WebUI 新增数据文件管理、指令沙箱、保存并上线、图片发送方式和消息发送方式
+- 沙箱改为聊天式布局，流式追加回复并保留当前历史；支持任意指令
+- 配置保存/上线提示不会自动消失，可点击 `×` 关闭
+- 测试插件新增官方 `msg_type=8` 图文卡片、彩色 KaTeX 公式、语音/视频/群文件和键盘按钮
+- 修复卡片 + keyboard 发送时按钮丢失
+- WebUI 群聊/沙箱使用 QQ 风格按钮、卡片、语音、视频、文件和 Markdown 组件
+- README 按功能重新分布截图，恢复必要徽章，更新个人开发者能力、IP 白名单和已知限制
+- 测试图片切换到米游社公开素材
+
+### 🧹 历史整理
+
+- 将 `dev` 上的多个阶段性提交压缩为单个提交
+- 更新 README / CHANGELOG 中已过期的重启说明和功能描述
+- `main` 与 `dev` 同步到同一提交
+
+---
+
 ## 📅 2026-11-11
 
-> 今天共有 **12 个功能提交**，从 `GROUP_MEMBER` 事件恢复，到错误码归档、日志连续浏览、运营数据日期修复，再到群聊退出和消息日志补全。
+> 今天共有 **13 个功能提交**，从 `GROUP_MEMBER` 事件恢复，到错误码归档、日志连续浏览、运营数据日期修复，再到群聊退出和消息日志补全。
 
 ### ✨ 今日摘要
 
@@ -65,6 +88,7 @@ timeline
 | `f358065` | 23:42 | 🛠️ 修复 | 报错归档记录发送内容全文，默认屏蔽新错误码 |
 | `fc634c5` | 23:44 | ✨ 功能 | 全文件日志搜索支持随时停止 |
 | `ffe9996` | 23:47 | 🛠️ 修复 | 搜索结果跳转 502，搜索时预热行索引并自动重试 |
+| `83c77f0` | 00:17 | 🛠️ 修复 | YePanel 断开 resetLog 后重新挂载 WebUI 实时日志 hook |
 
 ---
 
@@ -683,6 +707,38 @@ fix(webui): warm log index during search and retry page loads
 
 ---
 
+### `83c77f0` — 修复 WebUI 实时日志停止
+
+**提交信息：**
+
+```text
+fix(webui): re-arm live logger after YePanel reset
+```
+
+**问题：**
+
+- 使用 YePanel 的实时日志后，再回到 QQBot WebUI 的实时日志页没有新消息
+- 原因是 YePanel 在每个 `/realtimeLog` WebSocket 关闭时执行 `resetLog()`
+- `resetLog()` 会替换 `global.logger`，把 WebUI 启动时挂上的 logger hook 清掉
+- WebUI 实时日志 SSE 仍然连着，但服务端已经不再采集新日志
+
+**修复：**
+
+- WebUI 启动时保留原有 hook
+- 每 2 秒检查当前 `globalThis.logger`
+- 如果 logger 被替换或 hook 丢失，自动重新挂载
+- 不修改 YePanel，也不影响其正常运行
+
+**验证：**
+
+- 建立 YePanel `/realtimeLog` WebSocket
+- 关闭 WebSocket，触发 YePanel `resetLog()`
+- 等待 4 秒后连接 WebUI `/api/logs/live`
+- 继续收到新的 INFO/MARK 群消息日志
+- 实测恢复后新日志时间点正常递增
+
+---
+
 ## ✅ 验证
 
 | 检查项 | 结果 |
@@ -702,6 +758,7 @@ fix(webui): warm log index during search and retry page loads
 | 默认屏蔽码 | **40034005、40034105、40034128** |
 | 搜索随时停止 | **通过** |
 | 搜索结果跳转 | **通过：745 万行文件不再 502** |
+| YePanel 后 WebUI 实时日志 | **通过：resetLog 后自动恢复** |
 | 实时日志群消息 | **通过** |
 | 错误码归档 | **40034005 默认屏蔽** |
 | 群聊退出 API | **路由与错误处理通过**，实际退出受平台白名单限制 |
@@ -728,4 +785,5 @@ fix(webui): warm log index during search and retry page loads
   - `f358065`（报错完整上下文 / 新默认屏蔽码）
   - `fc634c5`（全文件搜索随时停止）
   - `ffe9996`（搜索结果跳转 502 修复）
+  - `83c77f0`（YePanel reset 后 WebUI 实时日志恢复）
   - 本更新日志的提交
