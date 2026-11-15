@@ -514,6 +514,8 @@ function renderConfigForm(data) {
       ${configField("图片发送方式", "toBotUpload", data.toBotUpload === false ? "url" : "material", "select", "保存后立即生效；官方素材会转存为 qqbot-media://，公网 URL 不占素材额度", [["material", "官方素材（推荐，失败回退 URL）"], ["url", "公网 URL（直接引用）"]])}
       ${configField("隐藏频道撤回提示", "hideGuildRecall", !!data.hideGuildRecall, "checkbox")}
       ${configField("自动安装测试插件", "autoInstallExample", !!data.autoInstallExample, "checkbox")}
+      ${configField("群文件超限提示", "fileFallback.notify", data.fileFallback?.notify !== false, "checkbox", "发送「群文件超过上限」消息，1 分钟后撤回")}
+      ${configField("群文件超限日志", "fileFallback.log", data.fileFallback?.log !== false, "checkbox", "记录群文件超限日志")}
       ${configField("群成员/入群申请事件", "groupMemberEvent", data.groupMemberEvent !== false, "checkbox")}
     </div>
     <div class="config-card">

@@ -391,6 +391,10 @@ idFormat:                 # 用于生成 e.user_id 与 e.group_id
   prefix: none            # none=裸 openid（Windows 安全，默认）/ qq=机器人QQ / appid=机器人AppID
   separator: ":"          # 前缀分隔符，可填 :、_ 或任意自定义字符；prefix=none 时不生效
 
+fileFallback:
+  notify: true            # 群文件超过上限时发送提示，1 分钟后自动撤回
+  log: true               # 是否记录群文件超限日志
+
 webui:
   enabled: true
   port: 2580
@@ -411,6 +415,7 @@ markdown:
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
 | `toBotUpload` | 图片发送方式：`true` 优先上传官方素材（`qqbot-media://`，失败回退公网 URL）；`false` 直接使用公网 URL。WebUI 配置中心为「图片发送方式」下拉框，保存后立即生效 |
 | `idFormat` | 用户/群 ID 格式：`prefix` 为 `none`（默认，裸 openid，Windows 文件名安全）、`qq`（机器人QQ）或 `appid`（机器人 AppID）；`separator` 可自定义（如 `:`、`_`）。WebUI 配置中心可修改，保存后新事件立即生效 |
+| `fileFallback` | 群文件超过平台上限时，按 `config/config/server.yaml` 的 `url` 生成 `/file/` 临时下载链接；`notify` 控制「群文件超过上限」提示，`log` 控制日志。单文件 ≤1MB 保留 1 小时，≤10MB 保留 10 分钟，>10MB 不保存 |
 | `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
 | `webui` | WebUI 配置：`enabled` / `port`（默认 2580）/ `host`（默认 0.0.0.0） |
 | `reconnect` | 重连/心跳参数，同旧版 |

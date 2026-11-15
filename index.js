@@ -116,6 +116,10 @@ const { config, configSave } = await makeConfig(
       prefix: "none",
       separator: ":",
     },
+    fileFallback: {
+      notify: true,
+      log: true,
+    },
     webui: {
       enabled: true,
       port: 2580,
@@ -1056,6 +1060,7 @@ const adapter = new (class QQBotAdapter {
             if (record) Bot.makeLog("warn", ["40034006 已记录违规内容，后续相同内容将停止发送", record.preview], data.self_id)
           }
           if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
+          if (/timeout of \d+ms exceeded|timeout/i.test(String(err?.message || err))) rets.timeout = true
           rets.error.push(err)
           return false
         }
@@ -1097,7 +1102,9 @@ const adapter = new (class QQBotAdapter {
 
     if ((await sendMsg()) === false) {
       if (this.contentGuard?.isBlocked(data.self_id, msg)) return rets
-      msgs = this.splitMixedMarkdownMessages(await this.makeMsg(data, msg, source))
+      const fallbackMsg = rets.timeout ? (data.__qqbotOriginalMsg ?? msg) : msg
+      if (rets.timeout) Bot.makeLog("warn", ["raw 发送超时，当前消息改用 legacy 重试", fallbackMsg], data.self_id)
+      msgs = this.splitMixedMarkdownMessages(await this.makeMsg(data, fallbackMsg, source))
       await sendMsg()
     }
 
@@ -1149,8 +1156,93 @@ const adapter = new (class QQBotAdapter {
     return rest
   }
 
+  /** 读取 config/config/server.yaml 的对外地址；localhost/127.0.0.1 返回 null */
+  async publicBaseUrl() {
+    try {
+      const raw = await fs.readFile("config/config/server.yaml", "utf8")
+      const m = raw.match(/^url:\s*['"]?([^'"\n#]+)/m)
+      let url = m?.[1]?.trim().replace(/\/+$/, "") || ""
+      if (!url) return null
+      if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/.*)?$/i.test(url)) return null
+      if (!/^https?:\/\//i.test(url)) url = "http://" + url
+      return url
+    } catch {
+      return null
+    }
+  }
+
+  fileDir() {
+    return path.join("data", "QQBot", "temp", "file")
+  }
+
+  async initFileDir() {
+    const dir = this.fileDir()
+    await fs.rm(dir, { recursive: true, force: true })
+    await fs.mkdir(dir, { recursive: true })
+  }
+
+  serveTempFile(req, res) {
+    const dir = path.resolve(this.fileDir())
+    const name = path.basename(decodeURIComponent(req.params.name || ""))
+    const file = path.join(dir, name)
+    if (!name || !file.startsWith(dir + path.sep)) {
+      res.status(404).type("html").send("<meta charset=utf-8><title>文件已被删除</title><h1>文件已被删除</h1>")
+      return
+    }
+    res.sendFile(file, { dotfiles: "deny" }, err => {
+      if (!err) return
+      res.status(404).type("html").send("<meta charset=utf-8><title>文件已被删除</title><h1>文件已被删除</h1>")
+    })
+  }
+
+  /** 群文件超限：按 server.yaml 的 url 提供临时下载链接 */
+  async fallbackGroupFile(data, msg, send) {
+    if (data.__fileFallbackTried) return
+    data.__fileFallbackTried = true
+    const list = Array.isArray(msg) ? msg : [msg]
+    const el = list.find(i => i && ["file", "video", "record"].includes(i.type) && i.file)
+    if (!el) return
+    const base = await this.publicBaseUrl()
+    if (!base) return
+    let file = String(el.file || "").replace(/^file:\/\//, "")
+    if (!file || /^(?:https?|base64):/i.test(file)) return
+    try {
+      const st = await fs.stat(file)
+      const MB = 1024 * 1024
+      if (st.size > 10 * MB) {
+        if (config.fileFallback?.log !== false)
+          Bot.makeLog("warn", ["群文件超过上限", file, `${(st.size / MB).toFixed(2)}MB`], data.self_id)
+        if (config.fileFallback?.notify === false) return
+        const ret = await this.sendMsg(data, send, [{ type: "text", text: "群文件超过上限" }])
+        const id = ret?.message_id?.[0] || ret?.data?.[0]?.id
+        if (id) setTimeout(() => this.recallGroupMsg(data, id).catch(() => {}), 60000)
+        return
+      }
+      const dir = this.fileDir()
+      await fs.mkdir(dir, { recursive: true })
+      let name = path.basename(file)
+      let dest = path.join(dir, name)
+      if (await fs.stat(dest).catch(() => null)) {
+        const ext = path.extname(name)
+        name = `${path.basename(name, ext)}-${Date.now()}${ext}`
+        dest = path.join(dir, name)
+      }
+      await fs.copyFile(file, dest)
+      const ttl = st.size <= MB ? 3600000 : 600000
+      const timer = setTimeout(() => fs.unlink(dest).catch(() => {}), ttl)
+      timer.unref?.()
+      const url = `${base}/file/${encodeURIComponent(name)}`
+      if (config.fileFallback?.log !== false)
+        Bot.makeLog("info", ["群文件超过上限，已转临时链接", url, `${(st.size / MB).toFixed(2)}MB`, `保留 ${ttl / 60000} 分钟`], data.self_id)
+      await this.sendMsg(data, send, [{ type: "text", text: `文件：${url}` }])
+    } catch (err) {
+      if (config.fileFallback?.log !== false) Bot.makeLog("warn", ["群文件超限转链接失败", file, err?.message || err], data.self_id)
+    }
+  }
+
   async sendGroupMsg(data, msg) {
     const groupId = this.rawId(data.group_id)
+    data.__qqbotOriginalMsg = msg
     // legacy 普通消息没有 Markdown @ 能力；保留旧行为：忽略 at，只发正文。
     // 如果强行转 Markdown，legacy 会整条发不出去。
     if (config.markdown[data.self_id] !== "legacy") msg = this.prepareGroupAtMarkdown(msg, data)
@@ -1160,6 +1252,10 @@ const adapter = new (class QQBotAdapter {
         data.bot.sdk.sendGroupMessage(groupId, this.toSdkMessage(msg, data), source),
       msg,
     )
+    if (ret?.error?.length) {
+      const code = this.errorStore?.codeOf(["发送消息错误", msg, ret.error[0]]) || ""
+      if (code === "40093003") await this.fallbackGroupFile(data, data.__qqbotOriginalMsg || msg, send)
+    }
     if (ret && (ret.message_id?.length || ret.data?.length)) this.recordChatOutgoing(data, msg, ret)
     return ret
   }
@@ -3481,6 +3577,13 @@ const adapter = new (class QQBotAdapter {
       )
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
+    await this.initFileDir()
+    Bot.express.get("/file/:name", this.serveTempFile.bind(this))
+    // Bot.express 自带 /File 文件发送中间件，Express 默认大小写不敏感会先截获 /file；
+    // 把临时文件路由提到最前，确保 /file/<name> 命中 HTML/临时文件逻辑。
+    const routerStack = Bot.express.router?.stack
+    const fileLayer = routerStack?.pop?.()
+    if (fileLayer) routerStack.unshift(fileLayer)
     await this.errorStore.init()
     await this.contentGuard.init()
     this.webuiEnabled = config.webui?.enabled !== false
