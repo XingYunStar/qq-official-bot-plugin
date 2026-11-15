@@ -88,16 +88,19 @@ let state = {
 let toastTimer = null
 const toast = (msg, sticky = false) => {
   const t = $("#toast")
-  $("#toastMsg").textContent = String(msg ?? "")
+  if (!t) return
+  const msgEl = $("#toastMsg")
+  if (msgEl) msgEl.textContent = String(msg ?? "")
+  else t.textContent = String(msg ?? "")
   t.classList.toggle("sticky", !!sticky)
   t.classList.add("on")
   clearTimeout(toastTimer)
   if (!sticky) toastTimer = setTimeout(() => t.classList.remove("on"), 2200)
 }
-$("#toastClose").onclick = () => {
+$("#toastClose")?.addEventListener("click", () => {
   clearTimeout(toastTimer)
   $("#toast").classList.remove("on")
-}
+})
 async function api(url, opts={}) {
   const res = await fetch(url, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts })
   const data = await res.json().catch(() => ({}))
@@ -464,6 +467,29 @@ function configField(label, path, value, type = "text", hint = "", options = nul
   }
   return `<div class="field${full}"><label>${esc(label)}</label>${control}${hint && type !== "checkbox" ? `<small>${esc(hint)}</small>` : ""}</div>`
 }
+function updateIdFormatPreview() {
+  const prefix = document.querySelector('[data-path="idFormat.prefix"]')?.value || "none"
+  const sepInput = document.querySelector('[data-path="idFormat.separator"]')
+  if (sepInput && prefix !== "none" && !sepInput.value.trim()) sepInput.value = ":"
+  const sep = sepInput?.value.trim() || ":"
+  const sample = "A12B3C4D00112233"
+  const head = prefix === "none" ? "" : prefix === "appid" ? "1021000000" : "3890000000"
+  const out = document.querySelector("#idFormatPreview")
+  if (!out) return
+  out.textContent = head ? `${head}${sep}${sample}` : sample
+  if (sepInput) {
+    const disabled = prefix === "none"
+    sepInput.readOnly = disabled
+    sepInput.classList.toggle("is-disabled", disabled)
+    sepInput.title = disabled ? "当前不使用机器人前缀，ID 分隔符不生效" : ""
+    const hint = sepInput.closest(".field")?.querySelector("small")
+    if (hint) {
+      hint.textContent = disabled
+        ? "当前不使用机器人前缀，分隔符不生效；选择机器人 QQ / AppID 后使用 :"
+        : "用于 e.user_id / e.group_id；可填 :、_ 或任意自定义字符"
+    }
+  }
+}
 function renderConfigForm(data) {
   const botIds = (data.token || []).map(line => parseTokenFields(line).id).filter(Boolean)
   const md = data.markdown || {}
@@ -479,6 +505,9 @@ function renderConfigForm(data) {
     <div class="config-card">
       <h3>基础</h3>
       ${configField("权限", "permission", data.permission ?? "master", "select", "", [["master", "master（主人）"], ["all", "all（所有人）"]])}
+      ${configField("用户 / 群 ID 前缀", "idFormat.prefix", data.idFormat?.prefix || "none", "select", "用于生成 e.user_id 与 e.group_id；Windows 推荐不使用前缀", [["none", "不使用机器人前缀（裸 openid） — A12B3C4D00112233"], ["qq", "机器人 QQ — 3890000000 + 分隔符 + openid"], ["appid", "机器人 AppID — 1021000000 + 分隔符 + openid"]])}
+      ${configField("ID 分隔符", "idFormat.separator", data.idFormat?.separator || ":", "text", "用于 e.user_id / e.group_id；可填 :、_ 或任意自定义字符；不使用前缀时不生效")}
+      <div class="field full"><label>ID 预览</label><div class="id-format-preview" id="idFormatPreview"></div><small>用于生成 e.user_id 与 e.group_id；修改后新事件生效</small></div>
       ${configField("图片压缩阈值（MB）", "imageLength", data.imageLength ?? 3, "number", "0 表示不压缩")}
       ${configField("二维码模式", "toQRCode", data.toQRCode === "link" ? "link" : (data.toQRCode === true || data.toQRCode === "true") ? "true" : "false", "select", "", [["true", "直接二维码"], ["link", "链接"], ["false", "关闭"]])}
       ${configField("回调按钮", "toCallback", !!data.toCallback, "checkbox")}
@@ -517,6 +546,11 @@ function renderConfigForm(data) {
 `
   $("#cfgForm").querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" }))
   $("#cfgForm").querySelectorAll("[data-md-bot]").forEach(el => el.addEventListener("change", () => { $("#cfgDirty").textContent = "未保存" }))
+  $("#cfgForm").querySelectorAll('[data-path="idFormat.prefix"],[data-path="idFormat.separator"]').forEach(el => {
+    el.addEventListener("input", updateIdFormatPreview)
+    el.addEventListener("change", updateIdFormatPreview)
+  })
+  updateIdFormatPreview()
   renderTokenRows(data.token)
 }
 function parseTokenFields(line) {
@@ -688,6 +722,14 @@ $("#cfgMode").querySelectorAll("[data-cfg-mode]").forEach(b => b.onclick = () =>
 })
 $("#cfgText").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
 $("#cfgForm").addEventListener("input", () => { $("#cfgDirty").textContent = "未保存" })
+function showConfigNotice(message) {
+  const box = $("#cfgNotice")
+  if (!box) return
+  $("#cfgNoticeText").textContent = String(message ?? "")
+  box.classList.remove("hide")
+}
+$("#cfgNoticeClose")?.addEventListener("click", () => $("#cfgNotice")?.classList.add("hide"))
+
 async function saveConfig(apply = false) {
   const file = $("#cfgFile").value
   if (apply && file !== CONFIG_FORM_FILE) return toast("「保存并上线」仅支持 config/QQBot.yaml")
@@ -706,9 +748,13 @@ async function saveConfig(apply = false) {
     }
     $("#cfgDirty").textContent = ""
     toast(data.note || (apply ? "已保存并上线" : "已保存"), true)
+    showConfigNotice(data.note || (apply ? "已保存并上线" : "已保存"))
     await loadConfig()
     if (apply) await loadStatus()
-  } catch (e) { toast(e.message) }
+  } catch (e) {
+    toast(e.message, true)
+    showConfigNotice("保存失败：" + e.message)
+  }
 }
 $("#cfgSave").onclick = () => saveConfig(false)
 $("#cfgApply").onclick = () => saveConfig(true)

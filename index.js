@@ -111,6 +111,11 @@ const { config, configSave } = await makeConfig(
     autoInstallExample: true,
     exampleGuideSent: false,
     groupMemberEvent: true,
+    // 用户/群 ID 前缀与分隔符：none=裸 openid（Windows 安全），qq=机器人QQ，appid=机器人 AppID
+    idFormat: {
+      prefix: "none",
+      separator: ":",
+    },
     webui: {
       enabled: true,
       port: 2580,
@@ -167,9 +172,9 @@ const adapter = new (class QQBotAdapter {
       this.toQRCodeRegExp = urlRegexSafe(config.toQRCode)
     }
 
-    // 外部 ID 统一使用 appid:openid。用户 ID 不作为文件名使用，Windows
-    // 也不需要替换分隔符；rawId/stripSelfId 仅兼容读取旧版 U+F03A / "_" 数据。
-    this.sep = ":"
+    // 外部 ID 格式由 config.idFormat 控制；默认裸 openid，Windows 文件名安全。
+    // rawId/stripSelfId 兼容读取旧版 ":"、"_"、U+F03A 分隔符。
+    this.sep = config.idFormat?.separator || ":"
     this.bind_user = {}
     this.appid = {}
     this.watcher = {}
@@ -1479,7 +1484,7 @@ const adapter = new (class QQBotAdapter {
       group_id: this.stripSelfId(group_id, id),
     }
     // 消息事件里的 author/mentions 自带 member_role，优先用缓存，避免受限接口
-    const cached = Bot[id].gml.get(group_id)?.get(`${id}${this.sep}${i.user_id}`) || {}
+    const cached = Bot[id].gml.get(group_id)?.get(this.makeId(id, i.user_id)) || {}
     const role = cached.member_role
     return {
       ...this.pickFriend(id, user_id),
@@ -1527,7 +1532,7 @@ const adapter = new (class QQBotAdapter {
       getBotState: () => i.bot.sdk.groupService.getBotState(i.group_id),
       getMemberInfo: async user_id => {
         const raw = this.rawId(user_id)
-        const cached = i.bot.gml.get(i.group_id)?.get(`${id}${this.sep}${raw}`)
+        const cached = i.bot.gml.get(i.group_id)?.get(this.makeId(id, raw))
         const local = { ...cached, member_openid: raw }
         if (cached?.member_role) return local
         try {
@@ -1549,19 +1554,59 @@ const adapter = new (class QQBotAdapter {
    * 频道 ID 只去 qg_ 标记，不再剥数字前缀。
    * 需要剥「bot:appid:openid」双重前缀时用 sendExampleGuide 里的 normalizeMaster。
    */
+  get idSeparator() {
+    const sep = config.idFormat?.separator
+    return typeof sep === "string" ? sep : ":"
+  }
+
+  get idPrefixMode() {
+    return ["qq", "appid", "none"].includes(config.idFormat?.prefix) ? config.idFormat.prefix : "none"
+  }
+
+  /** 当前机器人 ID 前缀；none 时返回空字符串 */
+  idPrefix(self_id) {
+    const mode = this.idPrefixMode
+    if (mode === "none") return ""
+    if (mode === "appid") return String(Bot[self_id]?.info?.appid || self_id)
+    return String(self_id)
+  }
+
+  /** 生成对插件可见的用户/群 ID；支持 QQ、AppID、裸 openid 和自定义分隔符 */
+  makeId(self_id, raw) {
+    const value = this.rawId(raw)
+    if (!value) return ""
+    const prefix = this.idPrefix(self_id)
+    return prefix ? `${prefix}${this.idSeparator}${value}` : value
+  }
+
+  idSeparators() {
+    return [...new Set([this.idSeparator, ":", "_", "\uF03A"].filter(Boolean))]
+  }
+
+  /**
+   * 去掉机器人前缀拿到原始 openid。
+   * 兼容 : / _ / U+F03A 与自定义分隔符；裸 openid 原样返回。
+   */
   rawId(id) {
     const value = String(id ?? "")
     if (value.startsWith("qg_")) return value.slice(3)
-    return value.replace(/^\d+[:_\uF03A]/, "")
+    const seps = this.idSeparators()
+      .map(sep => sep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|")
+    if (!seps) return value
+    return value.replace(new RegExp(`^\\d+(?:${seps})`), "")
   }
 
-  /** 去掉指定机器人的前缀；按 self_id 精确匹配，避免误伤 openid 本身 */
+  /** 去掉指定机器人的 QQ/AppID 前缀；按前缀精确匹配，避免误伤 openid 本身 */
   stripSelfId(id, self_id) {
     const value = String(id ?? "")
     if (!self_id) return value
-    for (const sep of new Set([this.sep, ":", "_", "\uF03A"])) {
-      const prefix = `${self_id}${sep}`
-      if (value.startsWith(prefix)) return value.slice(prefix.length)
+    const prefixes = [...new Set([self_id, Bot[self_id]?.info?.appid, this.idPrefix(self_id)].filter(Boolean).map(String))]
+    for (const sep of this.idSeparators()) {
+      for (const prefix of prefixes) {
+        const head = `${prefix}${sep}`
+        if (value.startsWith(head)) return value.slice(head.length)
+      }
     }
     return value
   }
@@ -2085,7 +2130,7 @@ const adapter = new (class QQBotAdapter {
       message: content ? [{ type: "text", text: content }] : [],
       sender: known?.s ? { user_id: id } : undefined,
       time: Math.floor(Date.now() / 1000),
-      group_id: gid ? `${id}${this.sep}${gid}` : undefined,
+      group_id: gid ? this.makeId(id, gid) : undefined,
       expire: Date.now() + 10 * 60 * 1000,
       quoted: true,
     }
@@ -2170,7 +2215,7 @@ const adapter = new (class QQBotAdapter {
   }
 
   async makeFriendMessage(data, event) {
-    const user_id = `${data.self_id}${this.sep}${event.sender.user_id}`
+    const user_id = this.makeId(data.self_id, event.sender.user_id)
     data.sender = {
       ...data.bot.fl.get(user_id),
       ...event.sender,
@@ -2204,7 +2249,7 @@ const adapter = new (class QQBotAdapter {
       return false
     }
 
-    const user_id = `${data.self_id}${this.sep}${event.sender.user_id}`
+    const user_id = this.makeId(data.self_id, event.sender.user_id)
     data.sender = {
       ...data.bot.fl.get(user_id),
       ...event.sender,
@@ -2212,7 +2257,7 @@ const adapter = new (class QQBotAdapter {
       nickname: event.user_name || event.author?.username || event.sender?.username || user_id,
       avatar: event.author?.avatar || event.sender?.avatar || data.sender?.avatar || "",
     }
-    data.group_id = `${data.self_id}${this.sep}${group_id}`
+    data.group_id = this.makeId(data.self_id, group_id)
     // 部分群事件会带 group_name，顺便缓存下来，省一次群信息接口
     if (event.group_name) data.group_name = event.group_name
     Bot.makeLog(
@@ -2278,7 +2323,7 @@ const adapter = new (class QQBotAdapter {
       // 只认「数字 appid + 分隔符」前缀，避免 openid 里的历史分隔符被误判
       const groupId = /^\d+[:_\uF03A]/.test(rawGroup)
         ? rawGroup
-        : `${data.self_id}${this.sep}${rawGroup}`
+        : this.makeId(data.self_id, rawGroup)
       this.groupChat.add(data.self_id, groupId, {
         direction: "out",
         sender: {
@@ -2349,7 +2394,7 @@ const adapter = new (class QQBotAdapter {
     for (const m of list) {
       const openid = m.member_openid || m.id
       if (!openid) continue
-      const user_id = `${data.self_id}${this.sep}${openid}`
+      const user_id = this.makeId(data.self_id, openid)
       const old = gml.get(user_id) || {}
       const nickname = m.username || m.nickname || old.nickname
       const avatar = m.avatar || m.avatar_url || old.avatar
@@ -2505,7 +2550,7 @@ const adapter = new (class QQBotAdapter {
               String(i.is_you) === "true" ||
               (!i.user_id && !i.qq) ||
               i.user_id === data.self_id
-            i.qq = self ? data.self_id : `${data.self_id}${this.sep}${i.user_id}`
+            i.qq = self ? data.self_id : this.makeId(data.self_id, i.user_id)
           } else i.qq = `qg_${i.user_id}`
           break
       }
@@ -2544,7 +2589,7 @@ const adapter = new (class QQBotAdapter {
       get user_id() {
         return this.sender.user_id
       },
-      sender: { user_id: `${id}${this.sep}${event.operator_id}` },
+      sender: { user_id: this.makeId(id, event.operator_id) },
       message: [],
       raw_message: "",
     }
@@ -2632,7 +2677,7 @@ const adapter = new (class QQBotAdapter {
       get user_id() {
         return this.sender.user_id
       },
-      sender: { user_id: `${id}${this.sep}${event.operator_id}` },
+      sender: { user_id: this.makeId(id, event.operator_id) },
       message: [],
       raw_message: "",
     }
@@ -2670,7 +2715,7 @@ const adapter = new (class QQBotAdapter {
         await this.setFriendMap(data)
         break
       case "group":
-        data.group_id = `${id}${this.sep}${event.group_id}`
+        data.group_id = this.makeId(id, event.group_id)
         Bot.makeLog(
           "info",
           [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message],
@@ -2727,7 +2772,7 @@ const adapter = new (class QQBotAdapter {
             sub_type: data.sub_type,
             self_id: id,
             bot: Bot[id],
-            user_id: `${id}${this.sep}${this.rawId(raw)}`,
+            user_id: this.makeId(id, raw),
             time: event.time || Math.floor(Date.now() / 1000),
           }
           Bot.makeLog("mark", `好友${data.sub_type === "increase" ? "新增" : "删除"}：${e.user_id}`, id)
@@ -2744,8 +2789,8 @@ const adapter = new (class QQBotAdapter {
           sub_type: data.sub_type,
           self_id: id,
           bot: Bot[id],
-          group_id: `${id}${this.sep}${event.group_id}`,
-          operator_id: event.operator_id ? `${id}${this.sep}${event.operator_id}` : undefined,
+          group_id: this.makeId(id, event.group_id),
+          operator_id: event.operator_id ? this.makeId(id, event.operator_id) : undefined,
           time: event.time || Math.floor(Date.now() / 1000),
         }
         Bot.makeLog("mark", `机器人被${data.sub_type === "increase" ? "拉入" : "移出"}群：${e.group_id}`, id)
@@ -2768,9 +2813,9 @@ const adapter = new (class QQBotAdapter {
       sub_type,
       self_id: id,
       bot: Bot[id],
-      group_id: event.group_id ? `${id}${this.sep}${event.group_id}` : undefined,
-      user_id: event.user_id ? `${id}${this.sep}${event.user_id}` : undefined,
-      operator_id: event.operator_id ? `${id}${this.sep}${event.operator_id}` : undefined,
+      group_id: event.group_id ? this.makeId(id, event.group_id) : undefined,
+      user_id: event.user_id ? this.makeId(id, event.user_id) : undefined,
+      operator_id: event.operator_id ? this.makeId(id, event.operator_id) : undefined,
       time: event.time || Math.floor(Date.now() / 1000),
     }
     Bot.makeLog(
@@ -2790,8 +2835,8 @@ const adapter = new (class QQBotAdapter {
       sub_type: "join_request",
       self_id: id,
       bot: Bot[id],
-      group_id: `${id}${this.sep}${event.group_id}`,
-      user_id: `${id}${this.sep}${event.user_id}`,
+      group_id: this.makeId(id, event.group_id),
+      user_id: this.makeId(id, event.user_id),
       username: event.username,
       join_request_id: event.join_request_id,
       apply_at: event.apply_at,
@@ -3510,11 +3555,7 @@ const adapter = new (class QQBotAdapter {
       const masterList = cfg.master?.[id] || []
       // master 可能写完整 e.user_id（appid:openid），甚至残留 "bot:" 前缀。
       // 单聊接口要纯 openid：按 self_id 精确剥一次，剥完不要再剥。
-      const normalizeMaster = value => {
-        const raw = String(value ?? "")
-        const withoutBot = raw.startsWith(`${id}:`) ? raw.slice(id.length + 1) : raw
-        return this.stripSelfId(withoutBot, id)
-      }
+      const normalizeMaster = value => this.stripSelfId(String(value ?? ""), id)
       // 判权用完整 e.user_id、通知用纯 openid，两种形态都收进 masters 才能匹配 real_id
       const masters = new Set()
       for (const value of masterList) {

@@ -786,3 +786,11 @@ body[data-tab="chat"]{background:var(--bg)}
 [data-theme="light"] .qq-image,[data-theme="light"] .qq-video video{border:1px solid rgba(15,23,42,.06)}
 .sbx-bubble .qq-card,.sbx-bubble .qq-file{max-width:100%}
 .sbx-bubble .qq-voice{max-width:100%}
+
+.config-notice{display:flex;align-items:flex-start;gap:10px;margin:10px 0;padding:10px 12px;border:1px solid rgba(34,211,238,.3);border-left:3px solid var(--brand-2);border-radius:9px;background:rgba(34,211,238,.07);color:var(--text);font-size:11px;line-height:1.55}
+.config-notice.hide{display:none}
+.config-notice span{flex:1;min-width:0}
+.config-notice button{border:0;background:transparent;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:0 0 0 6px}
+.config-notice button:hover{color:var(--text)}
+.id-format-preview{padding:7px 9px;border:1px dashed rgba(139,92,246,.4);border-radius:7px;background:rgba(139,92,246,.06);font:11px/1.5 var(--mono);color:var(--brand-2);word-break:break-all}
+.config-card .field input.is-disabled{cursor:not-allowed;opacity:.55}

@@ -1148,6 +1148,13 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           values.bot.maxRetry = rawRetry === "" || rawRetry === ".inf" || rawRetry === "Infinity" ? Infinity : Number(rawRetry)
           if (!Number.isFinite(values.bot.maxRetry) && values.bot.maxRetry !== Infinity) return json(res, 400, { error: "bot.maxRetry 必须是数字或 Infinity" })
         }
+        if (values.idFormat) {
+          const prefix = String(values.idFormat.prefix ?? "none")
+          if (!["qq", "appid", "none"].includes(prefix)) return json(res, 400, { error: "ID 前缀只能是 qq、appid 或 none" })
+          const separator = String(values.idFormat.separator ?? ":").trim() || ":"
+          if (separator.length > 16) return json(res, 400, { error: "ID 分隔符最多 16 个字符" })
+          values.idFormat = { prefix, separator }
+        }
         if (values.token != null && (!Array.isArray(values.token) || values.token.some(v => typeof v !== "string"))) return json(res, 400, { error: "token 必须是字符串数组" })
         if (Array.isArray(values.token)) {
           for (const line of values.token) {
@@ -1156,7 +1163,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
             if (!/^[A-Za-z0-9]{32}$/.test(secret || "")) return json(res, 400, { error: `AppSecret 必须是 32 位字母或数字：${p[0] || "未命名账号"}` })
           }
         }
-        const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "groupMemberEvent", "webui", "bot", "reconnect", "markdown", "token"]
+        const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "groupMemberEvent", "idFormat", "webui", "bot", "reconnect", "markdown", "token"]
         try {
           const file = body.file
           const raw = await fs.readFile(file, "utf8")

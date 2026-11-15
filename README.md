@@ -387,6 +387,10 @@ hideGuildRecall: false
 imageLength: 3
 autoInstallExample: true  # 首次启动把测试插件装到 plugins/example/
 
+idFormat:                 # 用于生成 e.user_id 与 e.group_id
+  prefix: none            # none=裸 openid（Windows 安全，默认）/ qq=机器人QQ / appid=机器人AppID
+  separator: ":"          # 前缀分隔符，可填 :、_ 或任意自定义字符；prefix=none 时不生效
+
 webui:
   enabled: true
   port: 2580
@@ -406,6 +410,7 @@ markdown:
 | `groupMemberEvent` | 是否订阅 `GROUP_MEMBER`（1<<24）以接收成员增减、入群申请，默认 `true`；平台返回 4014 时运行期自动降级 |
 | `autoInstallExample` | 是否在首次启动时自动安装测试插件（默认 `true`） |
 | `toBotUpload` | 图片发送方式：`true` 优先上传官方素材（`qqbot-media://`，失败回退公网 URL）；`false` 直接使用公网 URL。WebUI 配置中心为「图片发送方式」下拉框，保存后立即生效 |
+| `idFormat` | 用户/群 ID 格式：`prefix` 为 `none`（默认，裸 openid，Windows 文件名安全）、`qq`（机器人QQ）或 `appid`（机器人 AppID）；`separator` 可自定义（如 `:`、`_`）。WebUI 配置中心可修改，保存后新事件立即生效 |
 | `exampleGuideSent` | 是否已向 master 发送过测试插件说明（发送成功后自动置 `true`） |
 | `webui` | WebUI 配置：`enabled` / `port`（默认 2580）/ `host`（默认 0.0.0.0） |
 | `reconnect` | 重连/心跳参数，同旧版 |
@@ -653,31 +658,47 @@ WebUI 新增「沙箱」页：
 
 ### user_id 格式与 master 配置
 
-QQ 官方机器人拿不到真实 QQ 号，事件里给的是 **user_openid**（32 位十六进制字符串），而且是按机器人隔离的。所以适配器对外给出的 ID 是「机器人 appid + 用户 openid」：
+QQ 官方机器人拿不到真实 QQ 号，事件里给的是 **user_openid**（32 位十六进制字符串），而且是按机器人隔离的。
 
-```
-114514:ABCDEF0123456789ABCDEF0123456789
-```
+默认 `idFormat.prefix: none`，因此 `e.user_id`、`e.sender.user_id`、`e.group_id` 现在是**裸 openid**，例如 `A12B3C4D00112233`，可以直接作为 Windows 文件名，不再出现冒号。以前的 `机器人AppID:openid` 只是旧版本遗留格式，仍可被解析，但新 ID 不再这样生成。
 
-`e.user_id`、`e.sender.user_id`、`e.group_id` 都是这个形式，**全平台统一使用冒号 `:`**。上面的 `114514` 和 `ABCDEF...` 都是示例占位，请换成你自己日志里看到的 ID。
-
-> 旧版 Windows 曾用私用区字符 U+F03A 作分隔符，日志里不可见、配置容易对不上。现在全平台统一为 `:`；代码读取旧缓存/旧配置时仍兼容 `:`、U+F03A、`_` 三种分隔符，但新生成的 ID 一律使用 `:`。
-
-`config/config/other.yaml` 里要写**完整的 `e.user_id`**，不是纯 openid：
+需要在 ID 中保留机器人信息时，可在 `config/QQBot.yaml` 或 WebUI「配置中心」选择：
 
 ```yaml
-# 主人帐号（全局）
-masterQQ:
-  - "114514:ABCDEF0123456789ABCDEF0123456789"
-
-# Bot账号:主人帐号（值仍是完整的 e.user_id）
-master:
-  - "114514:114514:ABCDEF0123456789ABCDEF0123456789"
+idFormat:
+  prefix: qq       # qq=机器人QQ，appid=机器人AppID；none=裸 openid
+  separator: ":"   # 可改为 "_" 或自定义字符
 ```
 
-不知道自己的 ID 就给机器人发一条消息，看日志里的 `好友消息：[<机器人appid>:<你的openid>]`，或发 `#qqbot原始` 查看事件字段；也可以先在群里用 `#QQBot绑定用户` 绑定。发送单聊通知时适配器会自动剥掉 appid 前缀，所以 `master` 写成纯 openid 也能收到通知，但**权限判定仍以完整 `e.user_id` 为准**。
+例如：
 
-> 如果你的旧数据来自 Windows 版的 U+F03A 分隔符，适配器可以读取，但建议把 `master` 配置改成上面的冒号格式，避免复制粘贴时不可见字符再次出错。
+```text
+机器人QQ + :    3890000000:A12B3C4D00112233
+机器人QQ + _    3890000000_A12B3C4D00112233
+AppID + :       1021000000:A12B3C4D00112233
+AppID + _       1021000000_A12B3C4D00112233
+无前缀          A12B3C4D00112233
+```
+
+自定义分隔符同样支持；`prefix: none` 时分隔符不生效。
+
+> 旧版 Windows 曾用私用区字符 U+F03A 作分隔符，日志里不可见、配置容易对不上。现在默认使用裸 openid；配置前缀时可以使用 `:`、`_` 或自定义分隔符。代码读取旧缓存/旧配置时仍兼容 `:`、`_`、U+F03A。
+
+`config/config/other.yaml` 的 master 写法要和当前 `idFormat` 对应的 `e.user_id` 一致；默认无前缀时直接写裸 openid：
+
+```yaml
+# 默认 idFormat.prefix: none，直接写裸 openid
+masterQQ:
+  - "ABCDEF0123456789ABCDEF0123456789"
+
+# Bot账号:主人帐号；无前缀时值也是裸 openid
+master:
+  - "3889049339:ABCDEF0123456789ABCDEF0123456789"
+```
+
+不知道自己的 ID 就给机器人发一条消息，看日志里的 `好友消息：[<当前格式的user_id>]`，或发 `#qqbot原始` 查看事件字段；也可以先在群里用 `#QQBot绑定用户` 绑定。默认无前缀时 master 直接填写裸 openid；使用前缀时填写完整的 `e.user_id`。
+
+> 如果你选择了 `idFormat.prefix: qq` 或 `appid`，master 请填写与当前格式一致的完整 ID；使用默认 `none` 时填写裸 openid 即可。旧版 `:`、`_`、U+F03A 数据仍可读取。
 
 ### master 单聊通知
 
