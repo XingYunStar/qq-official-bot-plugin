@@ -1124,14 +1124,25 @@ const adapter = new (class QQBotAdapter {
     const parts = []
     const rest = []
     for (const i of list) {
+      // ws-plugin 的 text 段是纯字符串；不能跳过，否则 raw 模式只剩 at。
+      if (typeof i === "string") {
+        parts.push(i)
+        continue
+      }
       if (!i || typeof i !== "object") continue
       if (i.type === "at") {
         const id = this.rawId(i.user_id ?? i.qq ?? "")
         if (id === "all") parts.push("<qqbot-at-everyone />")
         else if (id) parts.push(`<qqbot-at-user id="${id}" />`)
       } else if (i.type === "text") parts.push(String(i.text || ""))
-      else if (i.type === "markdown") parts.push(String(i.data?.content || i.content || ""))
-      else rest.push(i)
+      else if (i.type === "markdown") {
+        // GSUID / ws-plugin 可能把 markdown 正文直接放在 data 字符串里；
+        // 不能再只读 data.content，否则 at + markdown 会被压成只剩 @。
+        const data = i.data
+        const content =
+          typeof data === "string" ? data : (data?.content ?? i.content ?? "")
+        parts.push(String(content ?? ""))
+      } else rest.push(i)
     }
     if (!parts.length) return msg
     rest.push({ type: "markdown", data: { content: parts.join("") } })
@@ -1140,7 +1151,9 @@ const adapter = new (class QQBotAdapter {
 
   async sendGroupMsg(data, msg) {
     const groupId = this.rawId(data.group_id)
-    msg = this.prepareGroupAtMarkdown(msg, data)
+    // legacy 普通消息没有 Markdown @ 能力；保留旧行为：忽略 at，只发正文。
+    // 如果强行转 Markdown，legacy 会整条发不出去。
+    if (config.markdown[data.self_id] !== "legacy") msg = this.prepareGroupAtMarkdown(msg, data)
     const ret = await this.sendMsg(
       data,
       (msg, source) =>
