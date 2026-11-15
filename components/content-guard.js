@@ -20,12 +20,8 @@ function fileToken(file) {
     if (Buffer.isBuffer(file)) return "buffer:" + hash(file)
     if (file && typeof file === "object" && Buffer.isBuffer(file.data)) return "buffer:" + hash(file.data)
     const text = String(file ?? "").trim()
-    if (/^https?:\/\//i.test(text)) {
-      try {
-        const url = new URL(text)
-        return `url:${url.origin}${url.pathname}`
-      } catch {}
-    }
+    // 必须保留完整 URL（包含 GET 参数）；同一路径不同参数可能是不同图片
+    if (/^https?:\/\//i.test(text)) return `url:${text}`
     return "str:" + text
   } catch {
     return "str:" + String(file ?? "")

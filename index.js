@@ -2710,16 +2710,41 @@ const adapter = new (class QQBotAdapter {
       // 入群申请
       case "join_request":
         return this.makeJoinRequestNotice(id, event)
-      // 机器人被拉入 / 移出群
+      // 好友新增 / 删除
       case "increase":
       case "decrease": {
+        // 好友事件也会使用 increase/decrease，不能当成机器人被拉入群，
+        // 否则 group_id/user_id 为 undefined，ws-plugin 等会查询数据库报错。
+        if (data.notice_type === "friend") {
+          const raw = event.user_id || event.openid || event.user_openid || event.operator_id
+          if (!raw) {
+            Bot.makeLog("warn", ["好友通知缺少 user_id，已忽略", event], id)
+            return
+          }
+          const e = {
+            post_type: "notice",
+            notice_type: "friend",
+            sub_type: data.sub_type,
+            self_id: id,
+            bot: Bot[id],
+            user_id: `${id}${this.sep}${this.rawId(raw)}`,
+            time: event.time || Math.floor(Date.now() / 1000),
+          }
+          Bot.makeLog("mark", `好友${data.sub_type === "increase" ? "新增" : "删除"}：${e.user_id}`, id)
+          return Bot.em(`notice.friend.${data.sub_type}`, e)
+        }
+        // 机器人被拉入 / 移出群；缺少 group_id 时直接忽略，避免下游 undefined
+        if (data.notice_type !== "group" || !event.group_id) {
+          Bot.makeLog("debug", ["忽略缺少 group_id 的 increase/decrease 通知", event], id)
+          return
+        }
         const e = {
           post_type: "notice",
           notice_type: "group",
           sub_type: data.sub_type,
           self_id: id,
           bot: Bot[id],
-          group_id: event.group_id ? `${id}${this.sep}${event.group_id}` : undefined,
+          group_id: `${id}${this.sep}${event.group_id}`,
           operator_id: event.operator_id ? `${id}${this.sep}${event.operator_id}` : undefined,
           time: event.time || Math.floor(Date.now() / 1000),
         }
