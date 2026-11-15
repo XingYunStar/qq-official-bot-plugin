@@ -129,6 +129,7 @@ export class QQBotAdapterTest extends plugin {
         { reg: "^#qqbot公式$", fnc: "formulaCard" },
         { reg: "^#qqbot媒体$", fnc: "richMedia" },
         { reg: "^#qqbot(webui|WebUI)$", fnc: "webui" },
+        { reg: "^#qqbot流式(?:输出)?$", fnc: "stream" },
         { reg: "^#qqbot登录$", fnc: "qqLogin" },
         { reg: "^#qqbot数据(.*)$", fnc: "stats" },
         { reg: "^#qqbot撤回$", fnc: "recall" },
@@ -144,6 +145,8 @@ export class QQBotAdapterTest extends plugin {
         { reg: "^#qqbot进群申请$", fnc: "joinList" },
         { reg: "^#qqbot同意进群", fnc: "joinApprove" },
         { reg: "^#qqbot拒绝进群", fnc: "joinDecline" },
+        { reg: "^#qqbot拉黑拒绝进群(?:\\s*\\d+)?$", fnc: "joinBlacklistDecline" },
+        { reg: "^#qqbot测试报错$", fnc: "testError" },
       ],
     })
   }
@@ -180,6 +183,7 @@ export class QQBotAdapterTest extends plugin {
         "#qqbot卡片1/2/3 —— 官方 msg_type=8 图文卡片（tuwen）",
         "#qqbot公式 —— Markdown 公式 + 图片 + 按钮测试",
         "#qqbot媒体 —— 图片 / 语音 / 视频 / 群文件 / 按钮样式测试",
+        "#qqbot流式 —— 私聊流式输出测试（仅私聊，Markdown 分片）",
         "#qqbotwebui —— 查看 WebUI 地址和密码位置",
         "#qqbot登录 —— 查看 QQ 开放平台登录方式（WebUI 导入 Cookie）",
         "#qqbot数据 [today/yesterday/7d/14d/30d] —— 查看运营数据",
@@ -194,13 +198,50 @@ export class QQBotAdapterTest extends plugin {
         "#qqbot引用消息 —— 读取被引用消息的内容（本地缓存 10 分钟）",
         "#qqbot进群申请 —— 查看待审批的入群申请",
         "#qqbot同意进群 [序号] / #qqbot拒绝进群 [序号] —— 审批入群申请",
+        "#qqbot拉黑拒绝进群 [序号] —— 拒绝入群申请并加入群黑名单",
+        "#qqbot测试报错 —— 写入一条带用户/群/指令上下文的测试报错",
         "",
         "进群/退群/入群申请事件会自动提示；群管理接口要求机器人是群管理员。",
       ].join("\n"),
     )
   }
 
-  /** 撤回：优先撤回被引用的消息，否则发一条再撤回 */
+  /** 私聊流式输出：调用官方 /v2/users/{openid}/stream_messages */
+  async stream() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    if (e.message_type !== "private" && e.isPrivate !== true)
+      return e.reply("流式输出测试仅支持私聊，请私聊机器人发送 #qqbot流式")
+    const sdk = sdkOf(e)
+    if (typeof sdk?.createPrivateStream !== "function")
+      return e.reply("当前 qq-official-bot 版本不支持 createPrivateStream")
+    const userId = e.bot?.adapter?.rawId?.(e.user_id) || rawId(e.user_id)
+    if (!userId) return e.reply("没有拿到私聊用户 ID")
+    const stream = sdk.createPrivateStream(userId, {
+      inputMode: "replace",
+      contentType: "markdown",
+      msgId: e.message_id,
+    })
+    try {
+      const chunks = [
+        "## QQBot 流式输出测试\n\n正在生成第 1 段内容……",
+        "\n\n- 第 2 段：流式分片已到达",
+        "\n- 第 3 段：同一 stream_msg_id 持续追加",
+        "\n\n**流式输出完成。**",
+      ]
+      for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await sleep(350)
+        if (i === chunks.length - 1) await stream.end(chunks[i])
+        else await stream.write(chunks[i])
+      }
+      logger.mark(`[QQBot测试] 私聊流式输出完成：${userId}`)
+    } catch (err) {
+      logger.error(`[QQBot测试] 私聊流式输出失败：${errText(err)}`)
+      try { await e.reply(`流式输出失败：${errText(err)}`) } catch {}
+    }
+  }
+
+  /** 查看 WebUI 地址和密码位置 */
   async webui() {
     const e = this.e
     if (!isQQBot(e)) return false
@@ -820,6 +861,50 @@ $$`
 
   async joinDecline() {
     return this.dealJoin("decline")
+  }
+
+  /** 拒绝入群并拉黑申请人 */
+  async joinBlacklistDecline() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    if (!(await this.checkAdmin(e))) return false
+    try {
+      const list = await this.fetchJoinRequests(e)
+      if (!list.length) return e.reply("当前没有待审批的入群申请")
+      const idx = Number((e.msg.match(/\d+/) || [])[0] || 1)
+      const item = list[idx - 1]
+      if (!item) return e.reply(`序号超出范围（共 ${list.length} 条）`)
+      const rawGroupId = rawId(e.group_id)
+      await e.bot.sdk.groupService.approveJoinRequest(rawGroupId, item.member_openid, {
+        op: "decline",
+        join_request_id: item.join_request_id,
+        reject_reason: "管理员拒绝并拉黑",
+      })
+      await e.bot.sdk.groupService.updateMemberBlacklist(rawGroupId, {
+        op: "add",
+        member_openids: [item.member_openid],
+      })
+      return e.reply(`✅ 已拒绝并拉黑 ${item.username || item.member_openid} 的入群申请`)
+    } catch (err) {
+      return e.reply(`❌ 拉黑拒绝失败：${errText(err)}`)
+    }
+  }
+
+  /** 写入一条测试报错，用于验证 WebUI 报错页的用户/群/指令上下文 */
+  async testError() {
+    const e = this.e
+    if (!isQQBot(e)) return false
+    const adapter = e.bot?.adapter
+    if (!adapter?.errorStore?.capture) return e.reply("当前适配器没有报错归档")
+    const err = new Error("测试报错 code(99999999): 获取群成员列表失败（测试）")
+    try {
+      // 故意使用无效群 openid，模拟群成员列表接口失败
+      await e.bot.sdk.groupService.getMembers("invalid-group-openid")
+    } catch (apiErr) {
+      err.cause = apiErr
+    }
+    adapter.errorStore.capture(e.self_id, ["测试报错", err], adapter.errorContext?.(e) || {})
+    return e.reply("✅ 已写入测试报错，请到 WebUI「报错」页查看用户 / 群 / 指令上下文")
   }
 
   async dealJoin(op) {
