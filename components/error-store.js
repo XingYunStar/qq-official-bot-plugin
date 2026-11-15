@@ -168,7 +168,7 @@ export class ErrorStore {
     } catch { return false }
   }
 
-  capture(botId, args) {
+  capture(botId, args, meta = {}) {
     try {
       const code = collectCode(args, new Set()) || "unknown"
       if (this.ignored.has(code)) return false
@@ -178,6 +178,11 @@ export class ErrorStore {
         bot: String(botId || "").slice(0, 40),
         code,
         message: collectMessage(args),
+        userId: String(meta.userId || "").slice(0, 100),
+        userName: String(meta.userName || "").slice(0, 100),
+        groupId: String(meta.groupId || "").slice(0, 100),
+        groupName: String(meta.groupName || "").slice(0, 160),
+        command: String(meta.command || "").slice(0, 300),
         ...details,
       }
       void this.append(record)

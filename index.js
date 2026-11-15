@@ -1050,7 +1050,7 @@ const adapter = new (class QQBotAdapter {
           const logArgs = ["发送消息错误", i, err]
           const code = this.errorStore?.codeOf(logArgs) || ""
           const ignored = this.errorStore?.isIgnored(logArgs)
-          this.errorStore?.capture(data.self_id, logArgs)
+          this.errorStore?.capture(data.self_id, logArgs, this.errorContext(data))
           if (code === "40034006") {
             const record = this.contentGuard?.block(data.self_id, msg, { code })
             if (record) Bot.makeLog("warn", ["40034006 已记录违规内容，后续相同内容将停止发送", record.preview], data.self_id)
@@ -1278,7 +1278,7 @@ const adapter = new (class QQBotAdapter {
         } catch (err) {
           const logArgs = ["发送消息错误", i, err]
           const ignored = this.errorStore?.isIgnored(logArgs)
-          this.errorStore?.capture(data.self_id, logArgs)
+          this.errorStore?.capture(data.self_id, logArgs, this.errorContext(data))
           if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
           rets.error.push(err)
           return false
@@ -1437,6 +1437,24 @@ const adapter = new (class QQBotAdapter {
     const groupId = this.rawId(data.group_id)
     Bot.makeLog("info", `撤回群消息：[${groupId}] ${message_id}`, data.self_id)
     return this.recallMsg(data, i => data.bot.sdk.recallGroupMessage(groupId, i), message_id)
+  }
+
+  /** 报错上下文：用户、群和触发指令 */
+  errorContext(data = {}) {
+    const groupId = data.group_id || ""
+    const groupName =
+      data.group_name ||
+      this.groupStats?.get?.(data.self_id, groupId)?.name ||
+      data.bot?.gl?.get?.(groupId)?.group_name ||
+      data.bot?.gl?.get?.(groupId)?.groupName ||
+      ""
+    return {
+      userId: String(data.user_id || data.sender?.user_id || ""),
+      userName: String(data.sender?.nickname || data.sender?.card || data.sender?.name || ""),
+      groupId: String(groupId),
+      groupName: String(groupName || ""),
+      command: String(data.command || data.raw_message || ""),
+    }
   }
 
   recallDirectMsg(data, message_id, hide = config.hideGuildRecall) {

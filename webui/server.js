@@ -1246,8 +1246,15 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
         const code = String(url.searchParams.get("code") || "all")
         const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 200))
         const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0)
-        try { return json(res, 200, await adapter.errorStore.list({ code, limit, offset })) }
-        catch (err) { return json(res, 500, { error: String(err.message || err) }) }
+        try {
+          const data = await adapter.errorStore.list({ code, limit, offset })
+          // 旧记录只有群号时，从群统计缓存补群名，避免历史记录永远显示空群名
+          for (const entry of data.entries || []) {
+            if (!entry.groupName && entry.groupId)
+              entry.groupName = adapter.groupStats?.get?.(entry.bot, entry.groupId)?.name || ""
+          }
+          return json(res, 200, data)
+        } catch (err) { return json(res, 500, { error: String(err.message || err) }) }
       }
       if (pathname === "/api/error-log/config" && req.method === "POST") {
         if (!adapter.errorStore) return json(res, 503, { error: "错误码归档尚未初始化" })

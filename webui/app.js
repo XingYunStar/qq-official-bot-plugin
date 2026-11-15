@@ -769,17 +769,26 @@ function renderErrorList(data) {
     $("#errList").innerHTML = `<div class="card empty-state"><div class="empty-ico"><svg viewBox="0 0 24 24"><path d="M10.3 3.8L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></div><div><strong>没有匹配的报错</strong><p>当前错误码暂无记录，或记录已超过 30 天被清理。</p></div></div>`
     return
   }
-  $("#errList").innerHTML = entries.map(e => `
+  $("#errList").innerHTML = entries.map(e => {
+    const context = []
+    if (e.userName || e.userId)
+      context.push(`<span>用户：${esc(e.userName || "")}${e.userId ? `（${esc(e.userId)}）` : ""}</span>`)
+    if (e.groupName || e.groupId)
+      context.push(`<span>群：${esc(e.groupName || "")}${e.groupId ? `（${esc(e.groupId)}）` : ""}</span>`)
+    if (e.command) context.push(`<span>指令：${esc(e.command)}</span>`)
+    return `
     <article class="error-item">
       <div class="error-head">
         <span class="error-code">${esc(e.code || "unknown")}</span>
         <span class="error-time">${esc(errTime(e.time))}</span>
         <span class="error-bot">${esc(e.bot || "QQBot")}</span>
       </div>
+      ${context.length ? `<div class="error-context">${context.join("")}</div>` : ""}
       <div class="error-msg">${esc(e.message || "(无错误消息)")}</div>
       ${e.payload ? `<div class="error-payload"><div class="error-payload-title">发送内容 / 调用参数</div><pre>${esc(e.payload)}</pre></div>` : ""}
       ${e.detail ? `<details><summary>查看完整调用参数 / 请求 / 堆栈</summary><div class="error-detail">${esc(e.detail)}</div></details>` : (e.context ? `<details><summary>查看调用参数 / 堆栈</summary><div class="error-detail">${esc(e.context)}</div></details>` : "")}
-    </article>`).join("")
+    </article>`
+  }).join("")
 }
 async function loadErrorList(append = false) {
   try {
