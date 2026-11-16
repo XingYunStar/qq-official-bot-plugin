@@ -152,6 +152,31 @@ if (config.imageLength)
     Bot.makeLog("error", ["sharp 导入错误，图片压缩关闭", err], "QQBot-Plugin")
   }
 
+/**
+ * 通知事件带上 Bot/SDK 客户端供运行时使用，但核心日志会对事件做 JSON.stringify。
+ * 用 toJSON 只暴露轻量字段，避免序列化整个 SDK 客户端导致主线程卡死。
+ */
+function slimEvent(e) {
+  if (!e || typeof e !== "object" || typeof e.toJSON === "function") return e
+  Object.defineProperty(e, "toJSON", {
+    configurable: true,
+    enumerable: false,
+    value: () => ({
+      post_type: e.post_type,
+      notice_type: e.notice_type,
+      sub_type: e.sub_type,
+      self_id: e.self_id,
+      group_id: e.group_id,
+      user_id: e.user_id,
+      operator_id: e.operator_id,
+      username: e.username,
+      join_request_id: e.join_request_id,
+      time: e.time,
+    }),
+  })
+  return e
+}
+
 const adapter = new (class QQBotAdapter {
   constructor() {
     this.id = "QQBot"
@@ -2890,7 +2915,7 @@ const adapter = new (class QQBotAdapter {
         if (data.notice_type === "friend") {
           const raw = event.user_id || event.openid || event.user_openid || event.operator_id
           if (!raw) {
-            Bot.makeLog("warn", ["好友通知缺少 user_id，已忽略", event], id)
+            Bot.makeLog("warn", ["好友通知缺少 user_id，已忽略", { notice_type: data.notice_type, sub_type: data.sub_type }], id)
             return
           }
           const e = {
@@ -2903,11 +2928,11 @@ const adapter = new (class QQBotAdapter {
             time: event.time || Math.floor(Date.now() / 1000),
           }
           Bot.makeLog("mark", `好友${data.sub_type === "increase" ? "新增" : "删除"}：${e.user_id}`, id)
-          return Bot.em(`notice.friend.${data.sub_type}`, e)
+          return Bot.em(`notice.friend.${data.sub_type}`, slimEvent(e))
         }
         // 机器人被拉入 / 移出群；缺少 group_id 时直接忽略，避免下游 undefined
         if (data.notice_type !== "group" || !event.group_id) {
-          Bot.makeLog("debug", ["忽略缺少 group_id 的 increase/decrease 通知", event], id)
+          Bot.makeLog("debug", ["忽略缺少 group_id 的 increase/decrease 通知", { notice_type: data.notice_type, sub_type: data.sub_type }], id)
           return
         }
         const e = {
@@ -2921,13 +2946,13 @@ const adapter = new (class QQBotAdapter {
           time: event.time || Math.floor(Date.now() / 1000),
         }
         Bot.makeLog("mark", `机器人被${data.sub_type === "increase" ? "拉入" : "移出"}群：${e.group_id}`, id)
-        return Bot.em(`notice.group.bot.${data.sub_type}`, e)
+        return Bot.em(`notice.group.bot.${data.sub_type}`, slimEvent(e))
       }
       case "update":
       case "member.update":
         break
       default:
-        Bot.makeLog("debug", ["未处理的通知", event], id)
+        Bot.makeLog("debug", ["未处理的通知", { post_type: event.post_type, notice_type: event.notice_type, sub_type: event.sub_type, group_id: event.group_id, user_id: event.user_id }], id)
         return
     }
   }
@@ -2950,7 +2975,7 @@ const adapter = new (class QQBotAdapter {
       `群成员${sub_type === "increase" ? "加入" : "退出"}：[${data.group_id}] ${data.user_id}`,
       id,
     )
-    return Bot.em(`notice.group.${sub_type}`, data)
+    return Bot.em(`notice.group.${sub_type}`, slimEvent(data))
   }
 
   /** 入群申请 → notice.group.join_request */
@@ -2974,7 +2999,7 @@ const adapter = new (class QQBotAdapter {
       time: Number.isNaN(apply) ? Math.floor(Date.now() / 1000) : Math.floor(apply / 1000),
     }
     Bot.makeLog("mark", `入群申请：[${data.group_id}] ${event.username}(${data.user_id})`, id)
-    return Bot.em("notice.group.join_request", data)
+    return Bot.em("notice.group.join_request", slimEvent(data))
   }
 
   getFriendMap(id) {
