@@ -1206,9 +1206,7 @@ const adapter = new (class QQBotAdapter {
     await fs.mkdir(dir, { recursive: true })
   }
 
-  serveTempFile(req, res, next) {
-    // Express 默认大小写不敏感，/File/xxx 是核心文件服务，必须放行给后面的 /File 中间件
-    if (!req.path.startsWith("/file/")) return next?.()
+  serveTempFile(req, res) {
     const dir = path.resolve(this.fileDir())
     const name = path.basename(decodeURIComponent(req.params.name || ""))
     const file = path.join(dir, name)
@@ -1258,7 +1256,7 @@ const adapter = new (class QQBotAdapter {
       const ttl = st.size <= MB ? 3600000 : 600000
       const timer = setTimeout(() => fs.unlink(dest).catch(() => {}), ttl)
       timer.unref?.()
-      const url = `${base}/file/${encodeURIComponent(name)}`
+      const url = `${base}/qqbotfile/${encodeURIComponent(name)}`
       if (config.fileFallback?.log !== false)
         Bot.makeLog("info", ["群文件超过上限，已转临时链接", url, `${(st.size / MB).toFixed(2)}MB`, `保留 ${ttl / 60000} 分钟`], data.self_id)
       await this.sendMsg(data, send, [{ type: "text", text: `文件：${url}` }])
@@ -3605,12 +3603,7 @@ const adapter = new (class QQBotAdapter {
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
     await this.initFileDir()
-    Bot.express.get("/file/:name", this.serveTempFile.bind(this))
-    // Bot.express 自带 /File 文件发送中间件，Express 默认大小写不敏感会先截获 /file；
-    // 把临时文件路由提到最前，确保 /file/<name> 命中 HTML/临时文件逻辑。
-    const routerStack = Bot.express.router?.stack
-    const fileLayer = routerStack?.pop?.()
-    if (fileLayer) routerStack.unshift(fileLayer)
+    Bot.express.get("/qqbotfile/:name", this.serveTempFile.bind(this))
     await this.errorStore.init()
     await this.contentGuard.init()
     this.webuiEnabled = config.webui?.enabled !== false
