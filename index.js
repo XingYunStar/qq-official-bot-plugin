@@ -1206,7 +1206,9 @@ const adapter = new (class QQBotAdapter {
     await fs.mkdir(dir, { recursive: true })
   }
 
-  serveTempFile(req, res) {
+  serveTempFile(req, res, next) {
+    // Express 默认大小写不敏感，/File/xxx 是核心文件服务，必须放行给后面的 /File 中间件
+    if (!req.path.startsWith("/file/")) return next?.()
     const dir = path.resolve(this.fileDir())
     const name = path.basename(decodeURIComponent(req.params.name || ""))
     const file = path.join(dir, name)
