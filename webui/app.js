@@ -569,7 +569,7 @@ function tokenRowHtml(t = {}) {
   return `<div class="token-row" data-token-row data-qq="${esc(t.id || "")}" data-appid="${esc(t.appid || "")}">
     <div class="token-fields">
       <label>AppID<input data-token="appid" value="${esc(t.appid || "")}" placeholder="开放平台 AppID"></label>
-      <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="32 位 AppSecret" minlength="32" maxlength="32" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
+      <label>AppSecret<span class="secret-wrap"><input data-token="secret" type="password" value="${esc(t.secret || "")}" placeholder="AppSecret（非空）" autocomplete="new-password"><button class="secret-toggle" type="button">显示</button></span></label>
       <label>机器人QQ（自动获取）<span class="resolved-wrap"><span class="resolved-qq" data-qq-label>${t.id ? esc(t.id) : "保存时自动获取"}</span><button class="token-resolve" type="button">获取</button></span></label>
       <label>连接方式<select data-token="mode"><option value="ws" ${t.mode !== "webhook" ? "selected" : ""}>WebSocket</option><option value="webhook" ${t.mode === "webhook" ? "selected" : ""}>WebHook</option></select></label>
       <label class="token-flags">群聊<select data-token="group"><option value="1" ${t.group !== "0" ? "selected" : ""}>启用</option><option value="0" ${t.group === "0" ? "selected" : ""}>关闭</option></select></label>
@@ -601,7 +601,7 @@ function renderTokenRows(tokens) {
       const appid = row.querySelector('[data-token="appid"]').value.trim()
       const pass = secret.value.trim()
       if (!/^[A-Za-z0-9_-]+$/.test(appid)) throw new Error("AppID 格式不正确")
-      if (!/^[A-Za-z0-9]{32}$/.test(pass)) throw new Error("AppSecret 必须是 32 位字母或数字")
+      if (!pass) throw new Error("AppSecret 不能为空")
       const data = await api("/api/bot/resolve", { method: "POST", body: JSON.stringify({ appid, secret: pass }) })
       row.dataset.qq = data.qq
       row.dataset.appid = appid
@@ -665,7 +665,7 @@ async function collectConfigForm() {
     const appid = val("appid"), secret = val("secret")
     if (!appid && !secret) continue
     if (!/^[A-Za-z0-9_-]+$/.test(appid)) throw new Error("AppID 格式不正确：" + appid)
-    if (!/^[A-Za-z0-9]{32}$/.test(secret)) throw new Error("AppSecret 必须是 32 位字母或数字")
+    if (!secret) throw new Error("AppSecret 不能为空")
     let qq = row.dataset.qq
     if (!qq || row.dataset.appid !== appid) {
       const data = await api("/api/bot/resolve", { method: "POST", body: JSON.stringify({ appid, secret }) })

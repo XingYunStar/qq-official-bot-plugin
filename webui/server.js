@@ -1166,7 +1166,7 @@ export function startWebUI({ adapter, config, configSave, Bot, logger }) {
           for (const line of values.token) {
             const p = String(line).trim().split(":")
             const secret = p.length >= 6 ? p[3] : p.length === 5 && p[4] === "2" ? p[3] : p[2]
-            if (!/^[A-Za-z0-9]{32}$/.test(secret || "")) return json(res, 400, { error: `AppSecret 必须是 32 位字母或数字：${p[0] || "未命名账号"}` })
+            if (!String(secret || "").trim()) return json(res, 400, { error: `AppSecret 不能为空：${p[0] || "未命名账号"}` })
           }
         }
         const allowed = ["permission", "imageLength", "toQRCode", "toCallback", "toBotUpload", "hideGuildRecall", "autoInstallExample", "exampleGuideSent", "groupMemberEvent", "idFormat", "fileFallback", "webui", "bot", "reconnect", "markdown", "token"]
