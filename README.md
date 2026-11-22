@@ -12,7 +12,7 @@
 [![pnpm](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm&logoColor=white)](https://pnpm.io/)
 
 [![QQ 群](https://img.shields.io/badge/QQ%20群-1046894467-12b7f5?style=for-the-badge&logo=tencentqq&logoColor=white)](https://qm.qq.com/q/WdZoPbyPsI)
-[![机器人](https://img.shields.io/badge/机器人-流萤-ff69b4?style=for-the-badge&logo=qq&logoColor=white)](https://q.qq.com/qqbot/dashboard)
+[![机器人](https://img.shields.io/badge/机器人-流萤-ff69b4?style=for-the-badge&logo=qq&logoColor=white)](https://q.qq.com/qqbot/profile/?robot_uin=3889049339)
 [![更新日志](https://img.shields.io/badge/更新日志-CHANGELOG-8b5cf6?style=for-the-badge&logo=readthedocs&logoColor=white)](CHANGELOG.md)
 
 <br>
@@ -73,10 +73,12 @@
 
 QQ 开放平台个人开发者的机器人现在可以自由加入自己为群主 / 管理员的群聊：
 
-- **不用 @ 也能回应**：在群设置中给机器人开启「全量消息」
-- **主动发送消息**：在群设置中允许机器人主动消息
-- **群管理**：撤回、禁言、监听进 / 退群、处理进群申请
+- **不用 @ 也能回应**：群聊里点击机器人头像，进入设置，修改「获取群消息范围」
+- **主动发送消息**：群聊里点击机器人头像，进入设置，启用「主动发言」
+- **群管理**：撤回、禁言、踢人、监听进 / 退群、处理进群申请
 
+> 需更新 QQ 为最新版；踢人需要同时在开放平台设置、设置群管理员、机器人管理员权限设置。
+>
 > 具体能力取决于 QQ 开放平台权限和群设置。
 
 ## 🧭 架构与消息流
@@ -126,11 +128,11 @@ sequenceDiagram
 
 | 日期 | 更新 |
 | --- | --- |
-| 2026-11-14 | 沙箱改为聊天式布局：流式追加回复、当前历史、任意指令，不再需要「允许任意指令」开关 |
-| 2026-11-14 | 配置中心新增图片发送方式、消息发送方式、保存并上线；配置保存后弹窗可手动关闭 |
-| 2026-11-14 | 测试插件新增官方 `msg_type=8` 卡片、彩色 KaTeX 公式、语音/视频/文件组件 |
-| 2026-11-14 | README 截图改为按功能内嵌；移除徽章和 Star History |
-| 2026-11-13 | 报错归档、日志搜索、数据管理和群聊右键菜单完善 |
+| 2026-11-23 | 视频/语音不再误走图片压缩；群文件临时链接改用 `/qqbotfile/` |
+| 2026-11-23 | 被动回复重构：优先当前消息 ID，按权限切换主动消息，消息池按 60 分钟 / 5 分钟范围回退 |
+| 2026-11-23 | 通知事件增加轻量 `toJSON`，避免序列化整个 SDK 客户端导致主线程卡死 |
+| 2026-11-23 | 报错日志补充接口原始返回；测试插件新增 `#qqbot流式`、`#qqbot拉黑拒绝进群`、`#qqbot测试报错` |
+| 2026-11-23 | WebUI 报错页补充用户/群/指令上下文；AppSecret 改为仅校验非空 |
 
 ---
 
@@ -145,6 +147,8 @@ sequenceDiagram
 ```bash
 cd TRSS-Yunzai/plugins
 git clone https://github.com/XingYunStar/qq-official-bot-plugin.git
+# 国内网络可改用 Gitee 镜像：
+# git clone https://gitee.com/XingYunStar/qq-official-bot-plugin.git
 cd qq-official-bot-plugin
 pnpm install
 ```
@@ -169,7 +173,7 @@ pnpm install
 
 ### 3. 创建机器人
 
-打开 [QQ 开放平台](https://q.qq.com/qqbot/dashboard) 创建 Bot：
+打开 [QQ 开放平台](https://q.qq.com/qqbot/dashboard/) 创建 Bot：
 
 1. 创建机器人
 2. 开发设置 → 得到 `AppID` 和 `AppSecret`（机器人 QQ 号可由接口自动获取）
@@ -191,7 +195,7 @@ pnpm install
 3. 在「机器人账号」卡片点击「+ 添加机器人」
 4. 填写：
    - AppID
-   - AppSecret（32 位字母/数字）
+   - AppSecret（非空即可）
    - 连接方式（WebSocket / WebHook）
    - 群聊、频道私域开关
 5. 点击「保存并上线」，WebUI 会自动调用接口获取机器人 QQ 号、写入 YAML 并立即连接
@@ -214,7 +218,7 @@ pnpm install
 #QQBot设置102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432
 ```
 
-- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com/qqbot/dashboard)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
+- WebHook 模式（需要启用公网 HTTPS，在 `TRSS-Yunzai/config/config/server.yaml` 的 `https` 段配置证书 `key` / `cert`，并在[开放平台](https://q.qq.com/qqbot/dashboard/)添加回调地址 `url/QQBot` ，此模式有一定的延迟）
 
 ```
 #QQBot设置102345678:aBcDeFgHiJkLmNoPqRsTuVwXyZ123432:2
@@ -239,7 +243,7 @@ pnpm install
 
 | 字段 | 值 | 对应 intent | 结果 |
 | --- | --- | --- | --- |
-| 群Bot | `1` | `GROUP_AND_C2C_EVENT`（1<<25） | 接收群 @消息、群全量消息（需群主开启）、C2C 单聊、机器人被拉入/移出群；**不含成员增减、入群申请** |
+| 群Bot | `1` | `GROUP_AND_C2C_EVENT`（1<<25） | 接收群 @消息、群全量消息（需开启「获取群消息范围」）、C2C 单聊、机器人被拉入/移出群；**不含成员增减、入群申请** |
 | 群Bot | `1` | `GROUP_MEMBER`（1<<24） | 群成员进群/退群、入群申请；机器人需是群管理员，并在开放平台具备该 intent 权限 |
 | 群Bot | `0` | 不订阅 | 收不到群/单聊事件，表现是「机器人在群里但 @ 没反应」 |
 | 群Bot | `2` | WebHook | 不建立 WebSocket，事件由开放平台回调推送 |
@@ -341,7 +345,7 @@ https:
 
 | 能力 | 说明 |
 | --- | --- |
-| **群内全量消息** | 支持 `GROUP_MESSAGE_CREATE`（开启「接收所有消息」后普通群消息也会派发）；按 `msg_id` 去重，只有真的 @机器人 才补自身 `at` |
+| **群内全量消息** | 支持 `GROUP_MESSAGE_CREATE`（开启「获取群消息范围」后普通群消息也会派发）；按 `msg_id` 去重，只有真的 @机器人 才补自身 `at` |
 | **群引用（收）** | QQ 群引用不在 `message_reference`，而在 `msg_elements`（`message_type=103`）+ `message_scene.ext`；插件会自动补 `reply` 元素、还原真实消息 ID，`e.getReply()` 可读取被引用内容 |
 | **群引用（发）** | 按官方要求把 `message_reference.message_id` 转成 `msg_idx`（引用用户消息）或 `ref_idx`（引用机器人自己的消息），引用气泡正常显示；被动回复的 `msg_id` 由消息池决定 |
 | **被动回复池** | 插件记录收到的群消息 ID，消息池保留 60 分钟；不限制单条消息的尝试次数。仅当平台返回明确的被动消息 ID 错误（304103 / 40034005 / 40034024 / 40034025 / 40034026 / 40034027 / 40034128）时改用下一条 ID；下一条仍失败才切换主动消息。超时、内容违规、主动消息频控等错误不盲目重发 |
@@ -356,8 +360,8 @@ https:
 | **Webhook** | 继续复用 TRSS 的 `/QQBot` 路由，签名改用 SDK 的 Ed25519（不再依赖 tweetnacl） |
 | **日志中心** | 历史日志 + 实时日志；连续滚动窗口；全文件搜索可随时停止；命中结果跳转定位；ANSI 彩色日志；大文件按行索引分页，不把整份日志塞给浏览器 |
 | **报错归档** | 按错误码查看最近 30 天报错；保存发送内容、调用参数、请求、响应、堆栈；默认屏蔽 `40034005` / `40034105` / `40034128`；WebUI 可直接查看完整上下文 |
-| **数据管理** | WebUI 新增「数据」页：浏览 `data/QQBot`、查看 JSON/NDJSON、编辑保存、上传、下载、删除、新建目录；自动隐藏 `webui.json` 等认证文件，禁止路径穿越 |
-| **指令沙箱** | WebUI 新增「沙箱」页：模拟群聊/私聊事件执行机器人指令，不连接 QQ；像聊天一样显示当前历史，流式追加回复；渲染 Markdown、KaTeX 公式、图片、语音/视频/文件、键盘按钮、`msg_type=8` 图文卡片；捕获原始回复 JSON |
+| **数据管理** | 「数据」页：浏览 `data/QQBot`、查看 JSON/NDJSON、编辑保存、上传、下载、删除、新建目录；自动隐藏 `webui.json` 等认证文件，禁止路径穿越 |
+| **指令沙箱** | 「沙箱」页：模拟群聊/私聊事件执行机器人指令，不连接 QQ；像聊天一样显示当前历史，流式追加回复；渲染 Markdown、KaTeX 公式、图片、语音/视频/文件、键盘按钮、`msg_type=8` 图文卡片；捕获原始回复 JSON |
 | **运营数据** | WebUI 运营数据页：昨天 / 近 7 / 14 / 30 天 / 本月 / 总览 / 自定义范围；QQ 不提供当天数据，因此不显示「今天」 |
 | **Markdown / 图文卡片** | 支持 Markdown、表格、KaTeX 颜色公式、图片、内嵌键盘按钮和 `msg_type=8` 图文卡片；卡片可同时携带 keyboard |
 | **WebUI** | 内置管理面板：配置、日志、报错、数据、素材、群成员、群聊、运营数据；群聊支持右键退出；配置只填 AppID+AppSecret 自动获取机器人 QQ；密码在日志和 `data/QQBot/webui.json` |
@@ -449,7 +453,7 @@ markdown:
   日志中心与报错归档
 </p>
 
-- 地址：`http://<服务器IP>:2580/`
+- 地址：`http://127.0.0.1:2580`
 - 首次启动自动生成初始密码，打印在 TRSS 日志，也可在登录页点「打印密码到日志」（30 秒冷却）
 - **首次登录成功后必须设置自己的密码**；设置完成后不再打印初始密码
 - 功能：
@@ -521,7 +525,7 @@ location /qqbot-webui/ {
 
 ### QQ 开放平台登录
 
-运营数据来自 `q.qq.com/qqbot/dashboard` 后台接口，需要 QQ 开放平台登录态。WebUI 支持两种方式：
+运营数据来自 `q.qq.com/qqbot/dashboard/` 后台接口，需要 QQ 开放平台登录态。WebUI 支持两种方式：
 
 **扫码登录（推荐）**
 
@@ -532,7 +536,7 @@ location /qqbot-webui/ {
 
 **粘贴 Cookie**
 
-1. 浏览器登录 https://q.qq.com/qqbot/dashboard，打开开发者后台
+1. 浏览器登录 [https://q.qq.com/qqbot/dashboard/](https://q.qq.com/qqbot/dashboard/)，打开开发者后台
 2. F12 → Network，复制任意请求的 `Cookie` 请求头
 3. WebUI →「QQ 登录」→ 粘贴 Cookie → 保存
 
@@ -540,7 +544,7 @@ location /qqbot-webui/ {
 
 ## 📁 数据文件
 
-WebUI 新增「数据」页，用于管理：
+「数据」页用于管理：
 
 ```text
 data/QQBot/
@@ -576,7 +580,7 @@ data/QQBot/
 
 ## 🧪 指令沙箱
 
-WebUI 新增「沙箱」页：
+「沙箱」页：
 
 <p align="center">
   <img src="docs/screenshots/sandbox.png" alt="指令沙箱：聊天式对话、当前历史、任意指令" width="82%">
@@ -640,6 +644,9 @@ WebUI 新增「沙箱」页：
 | `#qqbot引用消息` | 读取被引用消息内容（支持 `msg_elements` 引用） |
 | `#qqbot撤回` | 撤回测试消息；引用消息时撤回被引用那条 |
 | `#qqbot连发` | 连续发送 10 条消息（测试被动回复消息池） |
+| `#qqbot流式` / `#qqbot流式输出` | 私聊流式输出测试（Markdown 分片，仅私聊） |
+| `#qqbot拉黑拒绝进群 [序号]` | 拒绝入群申请并加入群黑名单 |
+| `#qqbot测试报错` | 写入带用户/群/指令上下文的测试报错 |
 | `#qqbot大图` | 发送一张测试大图（URL，不压缩，素材上传/大图测试；兼容 `#qqbot9MB`） |
 | `#qqbot图文` | ARK 图文卡片 + 内嵌键盘按钮（群聊/单聊） |
 | `#qqbot图文1` | Markdown 图文卡片：图片 + 正文 + 单按钮 |
@@ -730,8 +737,7 @@ master:
 - 改动前没有记录过的旧消息，平台只给 `REFIDX` 索引，无法还原真实消息 ID；新消息会持久化（收 24h / 发 7 天）
 - 被动回复消息池保留 60 分钟；单条消息不限制尝试次数。仅明确的被动消息 ID 错误换下一条，连续失败后走主动消息（受主动消息配额限制）
 - 素材上传需要开放平台相应接口权限，失败时会自动回退公网 URL
-- 群内全量消息需要在群设置中由群主开启「接收所有消息」
-- 群聊踢人接口需要企业认证；个人开发者机器人即使拥有群管理员权限，也无法使用踢人功能
+- 群内全量消息需要在群聊中点击机器人头像，进入设置，修改「获取群消息范围」
 
 ## 测试
 

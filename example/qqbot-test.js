@@ -647,7 +647,7 @@ $$`
         `✅ 已踢出 ${ids[0]}${block ? "（并加入黑名单）" : ""}\n${JSON.stringify(ret ?? {})}`,
       )
     } catch (err) {
-      return e.reply(`❌ 踢人失败：${errText(err)}\n（需要机器人是群管理员）`)
+      return e.reply(`❌ 踢人失败：${errText(err)}`)
     }
   }
 
