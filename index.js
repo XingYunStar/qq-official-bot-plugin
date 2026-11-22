@@ -964,13 +964,22 @@ const adapter = new (class QQBotAdapter {
         case "record":
           i.type = "audio"
           i.file = await this.makeRecord(i.file)
+          if (message.length) {
+            messages.push(message)
+            message = []
+          }
+          break
         case "video":
+          if (message.length) {
+            messages.push(message)
+            message = []
+          }
+          break
         case "image":
           if (message.length) {
             messages.push(message)
             message = []
           }
-
           if (sharp && i.file && !i.noCompress) i.file = await this.compressImage(data, i.file)
           break
         case "file":
