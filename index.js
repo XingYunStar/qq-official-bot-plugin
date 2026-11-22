@@ -66,10 +66,18 @@ const MATERIAL_DAY = 24 * 60 * 60 * 1000
 const MATERIAL_WEEK = 7 * MATERIAL_DAY
 const MATERIAL_SAVE_DELAY = 5000
 
-/** 群被动回复：同一条消息最多回复 5 次，超过 110 秒就不能再作为被动回复 */
-const MSG_PASSIVE_TTL = 110 * 1000
-const MSG_PASSIVE_LIMIT = 5
-const MSG_POOL_MAX = 100
+/** 群被动回复消息池：只保留 60 分钟；不限制单条消息的尝试次数 */
+const MSG_PASSIVE_TTL = 2 * 60 * 60 * 1000
+/** 只有这些平台错误才说明当前被动消息 ID 不可用，才允许换下一个 ID */
+const PASSIVE_RETRY_CODES = new Set([
+  "304103",
+  "40034005",
+  "40034024",
+  "40034025",
+  "40034026",
+  "40034027",
+  "40034128",
+])
 
 /** 引用索引持久化：收到的消息 24 小时，机器人自己发的消息 7 天 */
 const REF_TTL_RECV = 24 * 60 * 60 * 1000
@@ -175,6 +183,22 @@ function slimEvent(e) {
     }),
   })
   return e
+}
+
+/** 日志里展示接口原始错误，避免只看到 undefined */
+function rawError(err) {
+  try {
+    const raw = err?.response?.data ?? err?.response ?? err?.cause ?? err
+    if (raw == null) return String(err || "")
+    if (typeof raw === "string") return raw.slice(0, 1200)
+    let text = JSON.stringify(raw)
+    if (!text || text === "{}" || text === "[]") {
+      text = `${err?.name || "Error"}: ${err?.message || ""}\n${err?.stack || ""}`
+    }
+    return text.length > 1200 ? text.slice(0, 1200) + "…" : text
+  } catch {
+    return String(err?.message || err || "").slice(0, 1200)
+  }
 }
 
 const adapter = new (class QQBotAdapter {
@@ -717,7 +741,7 @@ const adapter = new (class QQBotAdapter {
         } else if (explicit && this.isGroupChat(data)) {
           // 群聊引用：保留 reply 元素，发送时转成 message_reference.message_id（msg_idx）
           for (const i of messages) i.unshift({ type: "reply", id: reply.id })
-        } else if (!source.id) {
+        } else if (!source.id && !data.__qqbotActive) {
           source.id = reply.id
         }
       }
@@ -882,7 +906,7 @@ const adapter = new (class QQBotAdapter {
             i.unshift({ type: "reply", event_id: reply.id.replace(/^event_/, "") })
         else if (explicit && this.isGroupChat(data))
           for (const i of messages) i.unshift({ type: "reply", id: reply.id })
-        else if (!source.id) source.id = reply.id
+        else if (!source.id && !data.__qqbotActive) source.id = reply.id
       }
     }
     return messages
@@ -1025,7 +1049,7 @@ const adapter = new (class QQBotAdapter {
               ? { type: "reply", event_id: reply.id.replace(/^event_/, "") }
               : reply,
           )
-      else if (!source.id && Date.now() / 1000 - data.time < 300)
+      else if (!source.id && !data.__qqbotActive && Date.now() / 1000 - data.time < 300)
         source.id = data.message_id
     }
     return messages
@@ -1041,42 +1065,74 @@ const adapter = new (class QQBotAdapter {
   }
 
   async sendMsg(data, send, msg) {
-    const rets = { message_id: [], data: [], error: [] },
-      source = {}
+    const rets = { message_id: [], data: [], error: [] }
     const blocked = this.contentGuard?.isBlocked(data.self_id, msg)
     if (blocked) {
       Bot.makeLog("warn", ["内容曾被判定违规(40034006)，已跳过发送", blocked.preview], data.self_id)
       rets.error.push(new Error("消息内容曾被判定违规(40034006)，已停止发送"))
       return rets
     }
-    // 群聊被动回复：用 110 秒内最旧的消息 ID（每条最多回复 5 次），没有则走主动
-    const passiveId = this.pickMsgId(data)
-    if (passiveId) source.id = passiveId
-    else if (
-      !this.isGroupChat(data) &&
-      data.message_id &&
-      !String(data.message_id).startsWith("event_")
-    )
-      source.id = String(data.message_id)
-    let msgs
 
-    const sendMsg = async () => {
-      for (const i of msgs)
+    const group = this.isGroupChat(data)
+    const state = group
+      ? (data.__passiveState ||= {
+          currentId: data.message_id && !String(data.message_id).startsWith("event_") ? String(data.message_id) : "",
+          currentFailed: false,
+          activeAllowed: null,
+          activeFailed: false,
+          poolId: null,
+          poolRange: MSG_PASSIVE_TTL,
+        })
+      : null
+
+    const buildFor = async source => {
+      data.__qqbotActive = !source?.id
+      let msgs = []
+      for (const part of this.splitCardMessages(msg)) {
+        if (part.length === 1 && part[0]?.type === "card") {
+          msgs.push(part)
+          continue
+        }
+        if (part.some(i => i?.type === "card")) {
+          const card = this.normalizeCard(part.find(i => i?.type === "card"))
+          const keyboardEls = part.filter(i => i?.type === "button" || (i?.type === "raw" && i.data?.type === "keyboard"))
+          if (card && keyboardEls.length) {
+            const rows = []
+            for (const el of keyboardEls) {
+              if (el.type === "button") {
+                const buttonRows = Array.isArray(el.data) ? el.data : [el.data]
+                rows.push(...this.makeButtons(data, buttonRows))
+              } else {
+                rows.push(...(el.data?.content?.rows || el.data?.rows || []))
+              }
+            }
+            if (rows.length) {
+              msgs.push([card, { type: "keyboard", data: { content: { rows } } }])
+              continue
+            }
+          }
+        }
+        msgs.push(...(await this.buildMessages(data, part, source)))
+      }
+      return this.splitMixedMarkdownMessages(msgs)
+    }
+
+    const attempt = async (msgs, source) => {
+      rets.code = ""
+      for (const item of msgs) {
         try {
-          Bot.makeLog("debug", ["发送消息", i], data.self_id)
-          const ret = await send(i, source)
+          Bot.makeLog("debug", ["发送消息", item], data.self_id)
+          const ret = await send(item, source)
           Bot.makeLog("debug", ["发送消息返回", ret], data.self_id)
-
           rets.data.push(ret)
           if (ret.id) {
             rets.message_id.push(ret.id)
-            // 记录机器人自己发出的消息，供 isOwnMessage 判断能否撤回
             this.sentMsgs.set(ret.id, Date.now() + 2 * 60 * 60 * 1000)
             if (this.sentMsgs.size > 500)
               for (const [k, v] of this.sentMsgs) if (v < Date.now()) this.sentMsgs.delete(k)
           }
         } catch (err) {
-          const logArgs = ["发送消息错误", i, err]
+          const logArgs = ["发送消息错误", item, err]
           const code = this.errorStore?.codeOf(logArgs) || ""
           const ignored = this.errorStore?.isIgnored(logArgs)
           this.errorStore?.capture(data.self_id, logArgs, this.errorContext(data))
@@ -1085,54 +1141,114 @@ const adapter = new (class QQBotAdapter {
             if (record) Bot.makeLog("warn", ["40034006 已记录违规内容，后续相同内容将停止发送", record.preview], data.self_id)
           }
           if (!ignored) Bot.makeLog("error", logArgs, data.self_id)
-          if (/timeout of \d+ms exceeded|timeout/i.test(String(err?.message || err))) rets.timeout = true
+          rets.code = code
           rets.error.push(err)
           return false
         }
+      }
+      return true
     }
 
-    msgs = []
-    for (const part of this.splitCardMessages(msg)) {
-      if (part.length === 1 && part[0]?.type === "card") {
-        msgs.push(part)
-        continue
+    if (!group) {
+      const source = {}
+      if (data.message_id && !String(data.message_id).startsWith("event_")) source.id = String(data.message_id)
+      let msgs = await buildFor(source)
+      let ok = await attempt(msgs, source)
+      if (!ok) {
+        const fallbackMsg = data.__qqbotOriginalMsg ?? msg
+        msgs = this.splitMixedMarkdownMessages(await this.makeMsg(data, fallbackMsg, source))
+        await attempt(msgs, source)
       }
-      // 卡片 + 内嵌键盘必须放在同一条消息的 payload 里，否则 SDK 会把按钮拆丢。
-      if (part.some(i => i?.type === "card")) {
-        const card = this.normalizeCard(part.find(i => i?.type === "card"))
-        const keyboardEls = part.filter(i => i?.type === "button" || (i?.type === "raw" && i.data?.type === "keyboard"))
-        if (card && keyboardEls.length) {
-          const rows = []
-          for (const el of keyboardEls) {
-            if (el.type === "button") {
-              const buttonRows = Array.isArray(el.data) ? el.data : [el.data]
-              rows.push(...this.makeButtons(data, buttonRows))
-            } else {
-              rows.push(...(el.data?.content?.rows || el.data?.rows || []))
-            }
-          }
-          if (rows.length) {
-            msgs.push([
-              card,
-              { type: "keyboard", data: { content: { rows } } },
-            ])
-            continue
+      if (Array.isArray(data._ret_id)) data._ret_id.push(...rets.message_id)
+      return rets
+    }
+
+    // 当前消息 ID 不再重复留在备用池里
+    if (state.currentId) this.dropMsgId(data, state.currentId)
+    let poolRange = state.poolRange ?? MSG_PASSIVE_TTL
+    let ok = false
+
+    const pickPool = () => {
+      const gid = this.rawId(data.group_id || data.group_openid)
+      const list = this.msgPool.get(`${data.self_id}:${gid}`)
+      if (!list) return null
+      this.pruneMsgPool(list)
+      const now = Date.now()
+      for (const item of list) {
+        if (item.t + poolRange < now) continue
+        if (item.id === state.currentId) continue
+        if (state.poolId && item.id !== state.poolId) continue
+        return item.id
+      }
+      if (state.poolId) {
+        state.poolId = null
+        return pickPool()
+      }
+      return null
+    }
+
+    while (true) {
+      let source = {}
+      let kind = ""
+      if (!state.currentFailed && state.currentId) {
+        kind = "current"
+        source.id = state.currentId
+      } else if (state.activeAllowed && !state.activeFailed) {
+        kind = "active"
+      } else {
+        if (state.poolId && !this.msgPool.get(`${data.self_id}:${this.rawId(data.group_id || data.group_openid)}`)?.some(i => i.id === state.poolId)) state.poolId = null
+        const id = state.poolId || pickPool()
+        if (!id) break
+        state.poolId = id
+        kind = "pool"
+        source.id = id
+      }
+
+      const msgs = await buildFor(source)
+      ok = await attempt(msgs, source)
+      if (ok) {
+        if (kind === "pool") state.poolRange = 60 * 60 * 1000
+        break
+      }
+
+      const code = rets.code || ""
+      const raw = rawError(rets.error.at(-1))
+      // SDK 有时消息已投递但返回了无法解析错误码的异常；此时重发会重复，
+      // 按已发送处理并保留当前 source，继续用同一条消息 ID。
+      if (!code) {
+        Bot.makeLog("warn", ["发送返回未知错误，按已发送处理，不重发", raw], data.self_id)
+        break
+      }
+      if (kind === "current") {
+        state.currentFailed = true
+        this.dropMsgId(data, state.currentId)
+        if (state.activeAllowed == null) {
+          try {
+            const v = await data.bot.sdk.groupService.getBotState(this.rawId(data.group_id || data.group_openid))
+            state.activeAllowed = !!v?.allow_proactive_msg
+          } catch {
+            state.activeAllowed = false
           }
         }
+        Bot.makeLog("warn", ["当前消息被动回复失败", code, raw, "主动权限", state.activeAllowed], data.self_id)
+        continue
       }
-      msgs.push(...(await this.buildMessages(data, part, source)))
+
+      if (kind === "active") {
+        state.activeFailed = true
+        Bot.makeLog("warn", ["主动消息发送失败，转被动消息池", code, raw], data.self_id)
+        continue
+      }
+
+      // 被动池候选 ID 第一次发送失败：删除并缩小到 5 分钟范围
+      this.dropMsgId(data, source.id)
+      state.poolId = null
+      poolRange = 5 * 60 * 1000
+      Bot.makeLog("warn", ["被动消息池 ID 首次发送失败，缩小到 5 分钟范围", code, raw, source.id], data.self_id)
     }
 
-    msgs = this.splitMixedMarkdownMessages(msgs)
-
-    if ((await sendMsg()) === false) {
-      if (this.contentGuard?.isBlocked(data.self_id, msg)) return rets
-      const fallbackMsg = rets.timeout ? (data.__qqbotOriginalMsg ?? msg) : msg
-      if (rets.timeout) Bot.makeLog("warn", ["raw 发送超时，当前消息改用 legacy 重试", fallbackMsg], data.self_id)
-      msgs = this.splitMixedMarkdownMessages(await this.makeMsg(data, fallbackMsg, source))
-      await sendMsg()
-    }
-
+    // 本次发送结束后，后续消息默认只使用 60 分钟范围内的池
+    state.poolRange = 60 * 60 * 1000
     if (Array.isArray(data._ret_id)) data._ret_id.push(...rets.message_id)
     return rets
   }
@@ -1765,11 +1881,13 @@ const adapter = new (class QQBotAdapter {
 
   /**
    * 记录群消息 ID，供被动回复使用。
-   * 官方限制：同一条群消息最多回复 5 条；这里只保留 110 秒内的消息，
-   * 发送时优先用最旧的，避免一条消息被回复次数打满后无法再回复。
+   * 消息池保留 60 分钟；不再限制单条消息的回复次数。
+   * 使用后轮转到池尾；失败时切换到池里的下一条，全部失败后才走主动消息。
    */
   recordMsgId(data) {
     if (data?.message_type !== "group" || data.channel_id || data.guild_id) return
+    // 机器人消息的 msg_id 不能作为被动回复来源；只记录用户消息
+    if (data.sender?.bot === true || data.raw?.author?.bot === true || data.raw?.sender?.bot === true) return
     if (!data.message_id || String(data.message_id).startsWith("event_")) return
     const gid = this.rawId(data.group_id || data.group_openid)
     if (!gid) return
@@ -1777,32 +1895,50 @@ const adapter = new (class QQBotAdapter {
     let list = this.msgPool.get(key)
     if (!list) this.msgPool.set(key, (list = []))
     if (list.some(i => i.id === data.message_id)) return
-    list.push({ id: data.message_id, t: Date.now(), used: 0 })
+    list.push({ id: data.message_id, t: Date.now() })
     this.pruneMsgPool(list)
-    if (list.length > MSG_POOL_MAX) list.splice(0, list.length - MSG_POOL_MAX)
   }
 
   pruneMsgPool(list) {
     const now = Date.now()
-    while (
-      list.length &&
-      (list[0].t + MSG_PASSIVE_TTL <= now || list[0].used >= MSG_PASSIVE_LIMIT)
-    )
-      list.shift()
+    while (list.length && list[0].t + MSG_PASSIVE_TTL <= now) list.shift()
   }
 
-  /** 取有效期内最旧、且回复次数未满的群消息 ID；没有则返回 null（走主动消息） */
+  /** 取消息池里最旧的可用 ID；没有则返回 null（走主动消息） */
   pickMsgId(data) {
     const gid = this.rawId(data?.group_id || data?.group_openid)
     if (!gid || data.channel_id || data.guild_id) return null
     const list = this.msgPool.get(`${data.self_id}:${gid}`)
     if (!list) return null
     this.pruneMsgPool(list)
-    const item = list[0]
-    if (!item) return null
-    item.used++
-    if (item.used >= MSG_PASSIVE_LIMIT) list.shift()
-    return item.id
+    return list[0]?.id || null
+  }
+
+  /** 使用后把 ID 移到池尾，下一轮优先用下一条，避免只反复使用一条 */
+  rotateMsgId(data, id) {
+    if (!id) return false
+    const gid = this.rawId(data?.group_id || data?.group_openid)
+    if (!gid) return false
+    const list = this.msgPool.get(`${data.self_id}:${gid}`)
+    if (!list) return false
+    const index = list.findIndex(i => i.id === id)
+    if (index < 0) return false
+    const [item] = list.splice(index, 1)
+    list.push(item)
+    return true
+  }
+
+  /** 请求失败后移除当前被动回复 ID，下一次会取池里的下一条 */
+  dropMsgId(data, id) {
+    if (!id) return false
+    const gid = this.rawId(data?.group_id || data?.group_openid)
+    if (!gid) return false
+    const list = this.msgPool.get(`${data.self_id}:${gid}`)
+    if (!list) return false
+    const index = list.findIndex(i => i.id === id)
+    if (index < 0) return false
+    list.splice(index, 1)
+    return true
   }
 
   materialFilePath(id) {

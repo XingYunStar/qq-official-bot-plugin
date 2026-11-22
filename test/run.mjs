@@ -876,13 +876,18 @@ console.log("\n=== R. 群被动回复消息池 ===")
   adapter.recordMsgId({ ...data, message_id: "m1" })
   adapter.recordMsgId({ ...data, message_id: "m2" })
   const picks = []
-  for (let i = 0; i < 6; i++) picks.push(adapter.pickMsgId(data))
-  assert("优先使用最旧的消息 ID", picks.slice(0, 4).every(i => i === "m1"), JSON.stringify(picks))
-  assert("同一消息最多回复 5 次", picks[4] === "m1" && picks[5] === "m2", JSON.stringify(picks))
+  for (let i = 0; i < 2; i++) {
+    const id = adapter.pickMsgId(data)
+    picks.push(id)
+    adapter.rotateMsgId(data, id)
+  }
+  assert("按消息池轮转使用", picks.join(",") === "m1,m2", JSON.stringify(picks))
 
   const list = adapter.msgPool.get("10001:GROUP_POOL")
-  list[0].t = Date.now() - 120 * 1000
-  assert("超过 110 秒走主动消息", adapter.pickMsgId(data) === null, JSON.stringify(list))
+  list[0].t = Date.now() - 61 * 60 * 1000
+  assert("超过 60 分钟过期后跳过", adapter.pickMsgId(data) === "m2", JSON.stringify(list))
+  adapter.dropMsgId(data, "m2")
+  assert("失败后移除消息池 ID", adapter.pickMsgId(data) === null, JSON.stringify(list))
   adapter.msgPool.clear()
 }
 

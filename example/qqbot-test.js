@@ -568,7 +568,7 @@ $$`
     return true
   }
 
-  /** 连续发送 10 条消息，用来验证被动回复消息池（每条消息最多回复 5 次） */
+  /** 连续发送 10 条消息，用来验证被动回复消息池 */
   async burst() {
     const e = this.e
     if (!isQQBot(e)) return false
