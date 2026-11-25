@@ -676,6 +676,8 @@ const adapter = new (class QQBotAdapter {
           content += await this.makeRawMarkdownText(data, `文件：${i.file}`, keyboard && button)
           break
         case "at":
+          // C2C 单聊没有 @ 概念，平台会报 40034106
+          if (!this.isGroupChat(data)) break
           if (i.qq === "all") content += "<qqbot-at-everyone />"
           else
             content += `<qqbot-at-user id="${this.stripSelfId(i.qq, data.self_id)}" />`
@@ -845,6 +847,8 @@ const adapter = new (class QQBotAdapter {
           content += this.makeTextChain(data, { text: `文件：${i.name || i.file}`, link: i.file })
           break
         case "at":
+          // C2C 单聊没有 @ 概念，平台会报 40034106
+          if (!this.isGroupChat(data)) break
           if (i.qq === "all") content += "<qqbot-at-everyone />"
           else
             content += `<qqbot-at-user id="${this.stripSelfId(i.qq, data.self_id)}" />`
