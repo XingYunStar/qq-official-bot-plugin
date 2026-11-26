@@ -79,6 +79,16 @@ const PASSIVE_RETRY_CODES = new Set([
   "40034128",
 ])
 
+/** 媒体/内容本身不可发送的错误：换主动或其他被动 ID 也没有意义，必须停止重试 */
+const FATAL_SEND_CODES = new Set([
+  "40093002", // 超过当天发送文件容量
+  "40093011", // 上传文件大小超过限制
+  "850019", // 不支持的文件格式
+  "850031", // 上传文件超过大小限制
+  "304017", // 图片上传错误
+  "304020", // 文件大小超限
+])
+
 /** 引用索引持久化：收到的消息 24 小时，机器人自己发的消息 7 天 */
 const REF_TTL_RECV = 24 * 60 * 60 * 1000
 const REF_TTL_SENT = 7 * 24 * 60 * 60 * 1000
@@ -922,22 +932,36 @@ const adapter = new (class QQBotAdapter {
       const buffer = await Bot.Buffer(file, { http: true })
 
       if (!Buffer.isBuffer(buffer)) return file
-
       if (buffer.length <= size) return buffer
 
-      let quality = 105,
-        output
-      do {
-        quality -= 10
-        output = await sharp(buffer).jpeg({ quality }).toBuffer()
+      let image = sharp(buffer)
+      const meta = await image.metadata()
+      let width = Number(meta.width) || 0
+      let height = Number(meta.height) || 0
+      let quality = 92
+      let output
+
+      // 只降质量不一定能压到限制内；同时逐步缩小尺寸。
+      for (let i = 0; i < 12; i++) {
+        let pipeline = sharp(buffer)
+        if (width && height) pipeline = pipeline.resize({ width, height, fit: "inside" })
+        output = await pipeline.jpeg({ quality }).toBuffer()
         Bot.makeLog(
           "debug",
-          `图片压缩完成 ${quality}%(${(output.length / 1024).toFixed(2)}KB)`,
+          `图片压缩 ${width}x${height} q=${quality} (${(output.length / 1024).toFixed(2)}KB)`,
           data.self_id,
         )
-      } while (output.length > size && quality > 10)
+        if (output.length <= size) return output
+        if (quality > 45) quality -= 10
+        else if (width > 320 && height > 320) {
+          width = Math.max(1, Math.round(width * 0.75))
+          height = Math.max(1, Math.round(height * 0.75))
+          quality = 80
+        } else break
+      }
 
-      return output
+      Bot.makeLog("warn", ["图片压缩后仍超过限制", `${(output?.length / 1024).toFixed(2)}KB`, `${config.imageLength}MB`], data.self_id)
+      return output || buffer
     } catch (err) {
       Bot.makeLog("error", ["图片压缩错误", err], data.self_id)
       return file
@@ -1230,6 +1254,10 @@ const adapter = new (class QQBotAdapter {
       // 按已发送处理并保留当前 source，继续用同一条消息 ID。
       if (!code) {
         Bot.makeLog("warn", ["发送返回未知错误，按已发送处理，不重发", raw], data.self_id)
+        break
+      }
+      if (FATAL_SEND_CODES.has(code)) {
+        Bot.makeLog("warn", ["消息本身不可发送，停止重试", code, raw], data.self_id)
         break
       }
       if (kind === "current") {
